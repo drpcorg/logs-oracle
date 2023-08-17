@@ -1,4 +1,4 @@
-package main
+package db
 
 import (
 	"context"
@@ -14,10 +14,6 @@ import (
 //go:embed db.sql
 var dbInitSQL string
 
-type DB struct {
-	db clickhouse.Conn
-}
-
 type Address [20]byte
 type Hash [32]byte
 
@@ -27,7 +23,11 @@ type Log struct {
 	Topics      [4]Hash
 }
 
-func NewDB(dsn string) (*DB, error) {
+type Conn struct {
+	db clickhouse.Conn
+}
+
+func New(dsn string) (*Conn, error) {
 	ctx := context.Background()
 
 	db, err := clickhouse.Open(&clickhouse.Options{
@@ -54,10 +54,10 @@ func NewDB(dsn string) (*DB, error) {
 		return nil, err
 	}
 
-	return &DB{db: db}, nil
+	return &Conn{db: db}, nil
 }
 
-func (db DB) AddLogs(logs *[]Log) error {
+func (db *Conn) Insert(logs *[]Log) error {
 	if len(*logs) <= 0 {
 		return nil
 	}
@@ -86,7 +86,7 @@ func (db DB) AddLogs(logs *[]Log) error {
 	return nil
 }
 
-func (db DB) GetLastIndexedBlockNumber() (uint64, error) {
+func (db *Conn) GetLastBlock() (uint64, error) {
 	var last uint64
 	err := db.db.QueryRow(context.Background(), `SELECT MAX(BlockNumber) FROM Logs`).Scan(&last)
 
@@ -101,34 +101,38 @@ func (db DB) GetLastIndexedBlockNumber() (uint64, error) {
 	return last + 1, nil
 }
 
-func (db DB) GetLogsCount(
-	fromBlock, toBlock *big.Int,
+func (db *Conn) GetLogsCount(
+	fromBlock, toBlock big.Int,
 	addresses []Address,
 	topics [][]Hash,
 ) (int64, error) {
-	filters := []string{}
-	args := []interface{}{}
+	args := []interface{}{fromBlock.Uint64(), toBlock.Uint64()}
+	filters := []string{"BlockNumber >= ?", "BlockNumber <= ?"}
 
-	if fromBlock != nil {
-		args = append(args, fromBlock)
-		filters = append(filters, "BlockNumber >= ?")
-	}
-	if toBlock != nil {
-		args = append(args, toBlock)
-		filters = append(filters, "BlockNumber <= ?")
-	}
 	if len(addresses) > 0 {
 		addrs := make([]string, 0, len(addresses))
 		for _, t := range addresses {
 			addrs = append(addrs, string(t[:]))
 		}
 
-		args = append(args, addrs)
 		filters = append(filters, "has(?, Address)")
+		args = append(args, addrs)
 	}
+
 	if len(topics) > 0 {
-		args = append(args, topics)
-		filters = append(filters, "hasAny(?, Topics)")
+		for i, topic := range topics {
+			if len(topic) <= 0 {
+				continue;
+			}
+
+			variants := make([]string, 0, len(topic))
+			for _, v := range topic {
+				variants = append(variants, string(v[:]))
+			}
+
+			filters = append(filters, "has(?, Topics[?])")
+			args = append(args, variants, i + 1)
+		}
 	}
 
 	request := `SELECT Count(*) FROM Logs`
