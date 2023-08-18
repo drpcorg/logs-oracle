@@ -8,7 +8,6 @@ import (
 	"log"
 	"math/big"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum"
@@ -22,7 +21,7 @@ var (
 	addr     = flag.String("addr", ":8000", "address to serve")
 	endpoint = flag.String("endpoint", "", "ethereum json rpc endpoint url")
 	dsn      = flag.String("dsn", "", "DSN for connect to ClickHouse")
-	batch    = flag.Uint64("batch-size", 256, "count of block for one request to node")
+	batch    = flag.Uint64("batch-size", 512, "count of block for one request to node")
 )
 
 type Filter struct {
@@ -46,6 +45,7 @@ func main() {
 	if err != nil {
 		log.Fatal("failed to load db", err)
 	}
+	defer db_conn.Close()
 
 	eth, err := ethclient.DialContext(context.Background(), *endpoint)
 	if err != nil {
@@ -61,6 +61,7 @@ func main() {
 			return
 		}
 
+		// parse params
 		fromBlock, err := parseBlockNumber(eth, filter.FromBlock)
 		if err != nil {
 			http.Error(w, "Invalid record 'fromBlock'", http.StatusBadRequest)
@@ -73,39 +74,38 @@ func main() {
 			return
 		}
 
-		addresses, topics := []db.Address{}, [][]db.Hash{}
+		addresses := make([]db.Address, len(filter.Address))
+		for i, adr := range filter.Address {
+			addresses[i] = db.Address(common.HexToAddress(adr))
+		}
 
-		if len(filter.Address) > 0 {
-			for _, adr := range filter.Address {
-				addresses = append(addresses, db.Address(common.HexToAddress(adr)))
+		topics := make([][]db.Hash, len(filter.Topics))
+		for i, item := range filter.Topics {
+			for _, topic := range item {
+				topics[i] = append(topics[i], db.Hash(common.HexToHash(topic)))
 			}
 		}
 
-		if len(filter.Topics) > 0 {
-			for _, item := range filter.Topics {
-				line := []db.Hash{}
-				for _, topic := range item {
-					line = append(line, db.Hash(common.HexToHash(topic)))
-				}
-				topics = append(topics, line)
-			}
+		// validate params
+		if fromBlock.Cmp(&toBlock) == 1 {
+			http.Error(w, "required fromBlock <= toBlock", http.StatusBadRequest)
+			return
 		}
 
-		count, err := db_conn.GetLogsCount(
-			fromBlock,
-			toBlock,
-			addresses,
-			topics,
-		)
+		if len(topics) > 4 {
+			http.Error(w, "allowed only 4 topic filters", http.StatusBadRequest)
+			return
+		}
 
-		fmt.Println(count)
-
+		// calc count
+		count, err := db_conn.GetLogsCount(fromBlock, toBlock, addresses, topics)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
-		fmt.Fprintf(w, "%d", count)
+		w.Header().Add("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"result":%d}` + "\n", count)
 	})
 
 	log.Fatal(http.ListenAndServe(*addr, nil))
@@ -114,13 +114,9 @@ func main() {
 func parseBlockNumber(eth *ethclient.Client, str string) (big.Int, error) {
 	var result big.Int
 
-	if str == "" {
-		str = "latest"
-	}
-
 	switch str {
 	// count approximately to the last block :)
-	case "earliest", "latest", "safe", "finalized", "pending":
+	case "", "earliest", "latest", "safe", "finalized", "pending":
 		value, err := eth.BlockNumber(context.Background())
 		if err != nil {
 			return result, err
@@ -142,86 +138,48 @@ func parseBlockNumber(eth *ethclient.Client, str string) (big.Int, error) {
 }
 
 func background(db_conn *db.Conn, eth *ethclient.Client) {
-	defer func() {
-		if err := recover(); err != nil {
-			log.Printf("paniced crawler: %v\n", err)
+	ctx := context.Background()
+
+	// ignore errors because we can continue to serve requests
+	for ; ; time.Sleep(time.Minute) {
+		start, err := db_conn.GetLastBlock()
+		if err != nil {
+			log.Printf("get last indexed block: %v\n", err)
+			continue
 		}
-	}()
 
-	// run crawler every minute
-	for {
-		syncWithETH(db_conn, eth)
+		last, err := eth.BlockNumber(ctx)
+		if err != nil {
+			log.Printf("get last block from eth: %v\n", err)
+			continue
+		}
 
-		time.Sleep(time.Minute)
-	}
-}
+		for from, to := start + 1, start; from <= last; from = to + 1 {
+			to = from + *batch
 
-func syncWithETH(db_conn *db.Conn, eth *ethclient.Client) {
-	// get last loaded block number
-	start, err := db_conn.GetLastBlock()
-	if err != nil {
-		log.Printf("get last indexed block: %v\n", err)
-		return
-	}
-
-	// get last block in node
-	last, err := eth.BlockNumber(context.Background())
-	if err != nil {
-		log.Printf("get last block in eth: %v\n", err)
-		return
-	}
-
-	ch := make(chan uint64)
-	wg := sync.WaitGroup{}
-
-	for i := 0; i < 16; i++ {
-		wg.Add(1)
-
-		go func() {
-			for number := range ch {
-				logs, err := getBlocksLogs(eth, number)
-				if err != nil {
-					log.Printf("index: failed load '%d' block:\n %v\n", number, err)
-					continue
-				}
-				db_conn.Insert(logs)
+			ethLogs, err := eth.FilterLogs(ctx, ethereum.FilterQuery{
+				FromBlock: new(big.Int).SetUint64(from),
+				ToBlock:   new(big.Int).SetUint64(to),
+			})
+			if err != nil {
+				log.Println(err)
+				break
 			}
 
-			wg.Done()
-		}()
-	}
+			logs := make([]db.Log, len(ethLogs))
+			for i, log := range ethLogs {
+				logs[i].BlockNumber = log.BlockNumber
+				logs[i].Address = db.Address(log.Address.Bytes())
 
-	for number := start + 1; number <= last; number += *batch {
-		ch <- number
-	}
+				for j, topic := range log.Topics {
+					logs[i].Topics[j] = db.Hash(topic.Bytes())
+				}
+			}
 
-	close(ch)
-	wg.Wait()
-}
-
-func getBlocksLogs(eth *ethclient.Client, blockNumber uint64) (*[]db.Log, error) {
-	ethLogs, err := eth.FilterLogs(context.Background(), ethereum.FilterQuery{
-		FromBlock: new(big.Int).SetUint64(blockNumber),
-		ToBlock:   new(big.Int).SetUint64(blockNumber + *batch - 1),
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	logs := make([]db.Log, 0, len(ethLogs))
-
-	for _, it := range ethLogs {
-		log := db.Log{
-			BlockNumber: it.BlockNumber,
-			Address:     db.Address(it.Address.Bytes()),
+			if err := db_conn.Insert(logs); err != nil {
+				log.Println(err)
+				break
+			}
 		}
-
-		for i, t := range it.Topics {
-			log.Topics[i] = db.Hash(t.Bytes()) // not more 4
-		}
-
-		logs = append(logs, log)
 	}
-
-	return &logs, nil
 }

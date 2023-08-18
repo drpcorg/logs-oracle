@@ -1,18 +1,14 @@
 package db
 
 import (
-	"context"
-	"database/sql"
-	_ "embed"
-	"fmt"
 	"math/big"
-	"strings"
-
-	"github.com/ClickHouse/clickhouse-go/v2"
+	"sync"
+	"unsafe"
+	"os"
 )
 
-//go:embed db.sql
-var dbInitSQL string
+// #include "db.hh"
+import "C"
 
 type Address [20]byte
 type Hash [32]byte
@@ -24,132 +20,72 @@ type Log struct {
 }
 
 type Conn struct {
-	db clickhouse.Conn
+	mu sync.RWMutex
+	db *C.db_t
 }
 
 func New(dsn string) (*Conn, error) {
-	ctx := context.Background()
+	dsn_cstr := C.CString(dsn)
+	defer C.free(unsafe.Pointer(dsn_cstr))
 
-	db, err := clickhouse.Open(&clickhouse.Options{
-		Addr: []string{dsn},
-		Auth: clickhouse.Auth{
-			Database: "default",
-			Username: "default",
-			Password: "",
-		},
-	})
+	err := os.MkdirAll(dsn, 0750)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := db.Ping(ctx); err != nil {
-		if exception, ok := err.(*clickhouse.Exception); ok {
-			return nil, fmt.Errorf("exception [%d] %s \n%s\n", exception.Code, exception.Message, exception.StackTrace)
-		}
-
-		return nil, err
-	}
-
-	if err := db.Exec(ctx, dbInitSQL); err != nil {
-		return nil, err
-	}
-
-	return &Conn{db: db}, nil
+	db, err := C.db_new(dsn_cstr)
+	return &Conn{db: db}, err
 }
 
-func (db *Conn) Insert(logs *[]Log) error {
-	if len(*logs) <= 0 {
-		return nil
-	}
+func (conn *Conn) Close() {
+	conn.mu.Lock()
+	defer conn.mu.Unlock()
 
-	batch, err := db.db.PrepareBatch(context.Background(), `INSERT INTO Logs`)
-	if err != nil {
-		return err
-	}
-
-	for _, log := range *logs {
-		topics := []string{}
-		for _, t := range log.Topics {
-			topics = append(topics, string(t[:]))
-		}
-
-		err := batch.Append(log.BlockNumber, string(log.Address[:]), topics)
-		if err != nil {
-			return err
-		}
-	}
-
-	if err = batch.Send(); err != nil {
-		return err
-	}
-
-	return nil
+	C.db_close(conn.db)
 }
 
-func (db *Conn) GetLastBlock() (uint64, error) {
-	var last uint64
-	err := db.db.QueryRow(context.Background(), `SELECT MAX(BlockNumber) FROM Logs`).Scan(&last)
-
-	switch {
-	case err == sql.ErrNoRows:
-		return 0, nil
-
-	case err != nil:
-		return 0, err
-	}
-
-	return last + 1, nil
-}
-
-func (db *Conn) GetLogsCount(
+func (conn *Conn) GetLogsCount(
 	fromBlock, toBlock big.Int,
 	addresses []Address,
 	topics [][]Hash,
-) (int64, error) {
-	args := []interface{}{fromBlock.Uint64(), toBlock.Uint64()}
-	filters := []string{"BlockNumber >= ?", "BlockNumber <= ?"}
+) (uint64, error) {
+	conn.mu.RLock()
+	defer conn.mu.RUnlock()
 
+	var addr *C.db_address_t = nil
 	if len(addresses) > 0 {
-		addrs := make([]string, 0, len(addresses))
-		for _, t := range addresses {
-			addrs = append(addrs, string(t[:]))
-		}
-
-		filters = append(filters, "has(?, Address)")
-		args = append(args, addrs)
+		addr = (*C.db_address_t)(unsafe.Pointer(&(addresses[0])))
 	}
 
-	if len(topics) > 0 {
-		for i, topic := range topics {
-			if len(topic) <= 0 {
-				continue;
-			}
+	count, err := C.db_query(
+		conn.db,
+		C.uint64_t(fromBlock.Uint64()), C.uint64_t(toBlock.Uint64()),
+		C.size_t(len(addresses)), addr,
+	)
+	return uint64(count), err
+}
 
-			variants := make([]string, 0, len(topic))
-			for _, v := range topic {
-				variants = append(variants, string(v[:]))
-			}
-
-			filters = append(filters, "has(?, Topics[?])")
-			args = append(args, variants, i + 1)
-		}
+func (conn *Conn) Insert(logs []Log) error {
+	if len(logs) < 1 {
+		return nil
 	}
 
-	request := `SELECT Count(*) FROM Logs`
-	if len(filters) > 0 {
-		request += " WHERE " + strings.Join(filters, " AND ")
-	}
+	conn.mu.Lock()
+	defer conn.mu.Unlock()
 
-	rows, err := db.db.Query(context.Background(), request, args...)
-	if err != nil {
-		return 0, err
-	}
-	defer rows.Close()
+	_, err := C.db_insert(
+		conn.db,
+		C.size_t(len(logs)),
+		(*C.db_log_t)(unsafe.Pointer(&(logs[0]))),
+	)
 
-	var count sql.NullInt64
-	for rows.Next() {
-		rows.Scan(&count)
-	}
+	return err
+}
 
-	return count.Int64, nil
+func (conn *Conn) GetLastBlock() (uint64, error) {
+	conn.mu.RLock()
+	defer conn.mu.RUnlock()
+
+	last, err := C.db_last_block(conn.db)
+	return uint64(last), err
 }
