@@ -12,7 +12,11 @@
 #include <fcntl.h>
 #include <sys/mman.h>
 
+#include "murmur2.hh"
+
 #define MAX_FILE_LENGTH    256
+
+#define HASH_SEED 1907531730
 
 #define STORE_BLOCKS_RESERVE_STEP 1000
 #define STORE_LOGS_RESERVE_STEP   1000
@@ -23,22 +27,22 @@
 #define ERR_FAIL_OPEN_FILES     3
 #define ERR_FAILED_REALLOC_FILE 5
 
-// Public API
 typedef uint8_t db_address_t[20];
 typedef uint8_t db_hash_t[32];
 
 typedef db_hash_t db_topics_t[4];
-
-typedef struct {
-  uint64_t number, logs_count, offset;
-  // TODO: db_bloom_t addresses_bloom, topics_bloom
-} db_block_t;
-
 typedef struct {
   uint64_t     block_number;
   db_address_t address;
   db_topics_t  topics;
 } db_log_t;
+
+typedef uint64_t db_cell_address_t;
+typedef uint64_t db_cell_topics_t[4];
+
+typedef struct {
+  uint64_t number, logs_count, offset;
+} db_block_t;
 
 typedef struct {
   char dir[MAX_FILE_LENGTH];
@@ -49,9 +53,9 @@ typedef struct {
   FILE *manifest;
   int blocks_fd, addresses_fd, topics_fd;
 
-  db_block_t   *blocks;
-  db_address_t *addresses;
-  db_topics_t  *topics;
+  db_block_t        *blocks;
+  db_cell_address_t *addresses;
+  db_cell_topics_t  *topics;
 } db_t;
 
 static void _read_manifest(db_t *db) {
@@ -106,17 +110,17 @@ static db_t *db_new(char *dir) {
   db->blocks_capacity = STORE_BLOCKS_RESERVE_STEP;
 
   db->blocks_fd    = _open_file(db, "blocks.bin", STORE_BLOCKS_RESERVE_STEP * sizeof(db_block_t));
-  db->addresses_fd = _open_file(db, "addresses.bin", STORE_LOGS_RESERVE_STEP * sizeof(db_address_t));
-  db->topics_fd    = _open_file(db, "topics.bin", STORE_LOGS_RESERVE_STEP * sizeof(db_topics_t));
+  db->addresses_fd = _open_file(db, "addresses.bin", STORE_LOGS_RESERVE_STEP * sizeof(db_cell_address_t));
+  db->topics_fd    = _open_file(db, "topics.bin", STORE_LOGS_RESERVE_STEP * sizeof(db_cell_topics_t));
 
   if (db->blocks_fd < 0 || db->addresses_fd < 0 || db->topics_fd < 0) {
     errno = ERR_FAIL_OPEN_FILES;
     return NULL;
   }
 
-  db->blocks    =   (db_block_t*)mmap(NULL, STORE_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, db->blocks_fd, 0);
-  db->addresses = (db_address_t*)mmap(NULL, STORE_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, db->addresses_fd, 0);
-  db->topics    =  (db_topics_t*)mmap(NULL, STORE_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, db->topics_fd, 0);
+  db->blocks    =        (db_block_t*)mmap(NULL, STORE_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, db->blocks_fd, 0);
+  db->addresses = (db_cell_address_t*)mmap(NULL, STORE_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, db->addresses_fd, 0);
+  db->topics    =  (db_cell_topics_t*)mmap(NULL, STORE_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, db->topics_fd, 0);
 
   // alloc blocks index
   db->blocks_count = 1;
@@ -181,6 +185,11 @@ static uint64_t db_query(db_t *db,
 
   uint64_t count = 0;
 
+  db_cell_address_t *addrs = (db_cell_address_t*)calloc(addresses_size, sizeof(db_cell_address_t ));
+  for (size_t j = 0; j < addresses_size; ++j) {
+    addrs[j] = murmur64A(addresses[j], sizeof(addresses[j]), HASH_SEED);
+  }
+
   for (size_t i = 0; i < db->blocks_count; ++i) {
     db_block_t* st = &(db->blocks[i]);
 
@@ -198,7 +207,7 @@ static uint64_t db_query(db_t *db,
 
     for (size_t i = st->offset, end = st->offset + st->logs_count; i < end; ++i) {
       for (size_t j = 0; j < addresses_size; ++j) {
-        if (memcmp(db->addresses[i], addresses[j], sizeof(db_address_t)) == 0) {
+        if (db->addresses[i] == addrs[j]) {
           ++count;
           break;
         }
@@ -250,8 +259,12 @@ static void db_insert(db_t *db, size_t size, db_log_t *logs) {
       }
     }
 
-    memcpy(db->addresses[db->logs_count], logs[i].address, sizeof(db_address_t));
-    memcpy(db->topics[db->logs_count], logs[i].topics, sizeof(db_topics_t));
+    db->addresses[db->logs_count] =
+      murmur64A(logs[i].address, sizeof(db_address_t), HASH_SEED);
+
+    for (size_t j = 0; j < 4; ++j) {
+      db->topics[db->logs_count][j] = murmur64A(logs[i].topics[j], sizeof(db_hash_t), HASH_SEED);
+    }
 
     last_block->logs_count++;
     db->logs_count++;
