@@ -8,6 +8,7 @@ import (
 	"log"
 	"math/big"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum"
@@ -18,10 +19,11 @@ import (
 )
 
 var (
-	addr     = flag.String("addr", ":8000", "address to serve")
-	endpoint = flag.String("endpoint", "", "ethereum json rpc endpoint url")
-	dsn      = flag.String("dsn", "", "DSN for connect to ClickHouse")
-	batch    = flag.Uint64("batch-size", 512, "count of block for one request to node")
+	addr               = flag.String("addr", ":8000", "address to serve")
+	endpoint           = flag.String("endpoint", "", "ethereum json rpc endpoint url")
+	dsn                = flag.String("dsn", "", "DSN for connect to ClickHouse")
+	crawler_batch      = flag.Uint64("crawler-batch", 512, "count of block for one request to node")
+	crawler_concurency = flag.Uint64("crawler-concurency", 64, "count of simultaneous requests to node")
 )
 
 type Filter struct {
@@ -105,7 +107,7 @@ func main() {
 		}
 
 		w.Header().Add("Content-Type", "application/json")
-		fmt.Fprintf(w, `{"result":%d}` + "\n", count)
+		fmt.Fprintf(w, `{"result":%d}`+"\n", count)
 	})
 
 	log.Fatal(http.ListenAndServe(*addr, nil))
@@ -137,49 +139,91 @@ func parseBlockNumber(eth *ethclient.Client, str string) (big.Int, error) {
 	return result, nil
 }
 
-func background(db_conn *db.Conn, eth *ethclient.Client) {
+func load_blocks(db_conn *db.Conn, eth *ethclient.Client, from, to uint64) (*[]db.Log, error) {
+	ethLogs, err := eth.FilterLogs(context.Background(), ethereum.FilterQuery{
+		FromBlock: new(big.Int).SetUint64(from),
+		ToBlock:   new(big.Int).SetUint64(to),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	logs := make([]db.Log, len(ethLogs))
+	for i, log := range ethLogs {
+		logs[i].BlockNumber = log.BlockNumber
+		logs[i].Address = db.Address(log.Address.Bytes())
+
+		for j, topic := range log.Topics {
+			logs[i].Topics[j] = db.Hash(topic.Bytes())
+		}
+	}
+
+	return &logs, nil
+}
+
+func sync_node(db_conn *db.Conn, eth *ethclient.Client) error {
 	ctx := context.Background()
 
-	// ignore errors because we can continue to serve requests
-	for ; ; time.Sleep(time.Minute) {
-		start, err := db_conn.GetLastBlock()
-		if err != nil {
-			log.Printf("get last indexed block: %v\n", err)
-			continue
+	start, err := db_conn.GetLastBlock()
+	if err != nil {
+		return fmt.Errorf("get last indexed block: %v\n", err)
+	}
+
+	last, err := eth.BlockNumber(ctx)
+	if err != nil {
+		return fmt.Errorf("get last block from eth: %v\n", err)
+	}
+
+	from, to := start+1, start
+	for from <= last {
+		wg := sync.WaitGroup{}
+
+		data := make([](*[]db.Log), *crawler_concurency)
+		errors := make([]error, *crawler_concurency)
+
+		i := uint64(0)
+		for ; i < *crawler_concurency && from <= last; i++ {
+			to = from + *crawler_batch
+			if to > last {
+				to = last
+			}
+
+			wg.Add(1)
+			go func(i, from, to uint64) {
+				defer wg.Done()
+				data[i], errors[i] = load_blocks(db_conn, eth, from, to)
+			}(i, from, to)
+
+			from = to + 1
 		}
 
-		last, err := eth.BlockNumber(ctx)
-		if err != nil {
-			log.Printf("get last block from eth: %v\n", err)
-			continue
-		}
+		wg.Wait()
 
-		for from, to := start + 1, start; from <= last; from = to + 1 {
-			to = from + *batch
+		for j := uint64(0); j < *crawler_concurency; j++ {
+			if errors[j] != nil {
+				return fmt.Errorf("eth_getLogs: %v\n", errors[j])
+			}
 
-			ethLogs, err := eth.FilterLogs(ctx, ethereum.FilterQuery{
-				FromBlock: new(big.Int).SetUint64(from),
-				ToBlock:   new(big.Int).SetUint64(to),
-			})
+			if data[j] == nil {
+				continue
+			}
+
+			err := db_conn.Insert(*data[j])
 			if err != nil {
-				log.Println(err)
-				break
+				return fmt.Errorf("insert in db: %v\n", err)
 			}
+		}
+	}
 
-			logs := make([]db.Log, len(ethLogs))
-			for i, log := range ethLogs {
-				logs[i].BlockNumber = log.BlockNumber
-				logs[i].Address = db.Address(log.Address.Bytes())
+	return nil
+}
 
-				for j, topic := range log.Topics {
-					logs[i].Topics[j] = db.Hash(topic.Bytes())
-				}
-			}
-
-			if err := db_conn.Insert(logs); err != nil {
-				log.Println(err)
-				break
-			}
+func background(db_conn *db.Conn, eth *ethclient.Client) {
+	for ; ; time.Sleep(time.Minute) {
+		err := sync_node(db_conn, eth)
+		if err != nil { // ignore errors because we can continue to serve requests
+			log.Printf("failed sync with node: %v\n", err)
+			continue
 		}
 	}
 }
