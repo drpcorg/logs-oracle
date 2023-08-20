@@ -1,22 +1,74 @@
 package db
 
 import (
-	"math/big"
+	"os"
 	"sync"
 	"unsafe"
-	"os"
+	"log"
 )
 
-// #include "db.hh"
+// #include "db.h"
 import "C"
 
-type Address [20]byte
-type Hash [32]byte
+type Hash [32]byte    // see db_hash_t
+type Address [20]byte // see db_address_t
 
-type Log struct {
+type Log struct { // see db_log_t
 	BlockNumber uint64
 	Address     Address
 	Topics      [4]Hash
+}
+
+type Query struct { // see db_query_t
+	FromBlock uint64
+	ToBlock   uint64
+	Addresses []Address
+	Topics    [][]Hash
+}
+
+func (q Query) DBQueryT() C.db_query_t {
+	internal := C.db_query_t{}
+
+	internal.from_block = C.uint64_t(q.FromBlock)
+	internal.to_block = C.uint64_t(q.ToBlock)
+
+	internal.addresses.len = C.size_t(len(q.Addresses))
+	internal.addresses.data = nil
+
+	if len(q.Addresses) > 0 {
+		bytes := C.size_t(len(q.Addresses)) * C.sizeof_db_address_t
+		internal.addresses.data = (*C.db_address_t)(C.malloc(bytes))
+
+		C.memcpy(
+			unsafe.Pointer(internal.addresses.data),
+			unsafe.Pointer(&(q.Addresses[0])),
+			bytes,
+		)
+	}
+
+	if len(q.Topics) > len(internal.topics) {
+		log.Fatal("too many topics")
+	}
+
+	for i := 0; i < len(internal.topics); i++ {
+		internal.topics[i].len = 0
+		internal.topics[i].data = nil
+
+		if len(q.Topics) > i && len(q.Topics[i]) > 0 {
+			internal.topics[i].len = C.size_t(len(q.Topics[i]))
+
+			bytes := C.size_t(len(q.Topics[i])) * C.sizeof_db_hash_t
+			internal.topics[i].data = (*C.db_hash_t)(C.malloc(bytes))
+
+			C.memcpy(
+				unsafe.Pointer(internal.topics[i].data),
+				unsafe.Pointer(&(q.Topics[i][0])),
+				bytes,
+			)
+		}
+	}
+
+	return internal
 }
 
 type Conn struct {
@@ -24,16 +76,16 @@ type Conn struct {
 	db *C.db_t
 }
 
-func New(dsn string) (*Conn, error) {
-	dsn_cstr := C.CString(dsn)
-	defer C.free(unsafe.Pointer(dsn_cstr))
+func NewDB(data_dir string) (*Conn, error) {
+	data_dir_cstr := C.CString(data_dir)
+	defer C.free(unsafe.Pointer(data_dir_cstr))
 
-	err := os.MkdirAll(dsn, 0750)
+	err := os.MkdirAll(data_dir, 0750)
 	if err != nil {
 		return nil, err
 	}
 
-	db, err := C.db_new(dsn_cstr)
+	db, err := C.db_new(data_dir_cstr)
 	return &Conn{db: db}, err
 }
 
@@ -44,24 +96,11 @@ func (conn *Conn) Close() {
 	C.db_close(conn.db)
 }
 
-func (conn *Conn) GetLogsCount(
-	fromBlock, toBlock big.Int,
-	addresses []Address,
-	topics [][]Hash,
-) (uint64, error) {
+func (conn *Conn) GetLogsCount(query *Query) (uint64, error) {
 	conn.mu.RLock()
 	defer conn.mu.RUnlock()
 
-	var addr *C.db_address_t = nil
-	if len(addresses) > 0 {
-		addr = (*C.db_address_t)(unsafe.Pointer(&(addresses[0])))
-	}
-
-	count, err := C.db_query(
-		conn.db,
-		C.uint64_t(fromBlock.Uint64()), C.uint64_t(toBlock.Uint64()),
-		C.size_t(len(addresses)), addr,
-	)
+	count, err := C.db_query(conn.db, query.DBQueryT())
 	return uint64(count), err
 }
 
@@ -88,4 +127,18 @@ func (conn *Conn) GetLastBlock() (uint64, error) {
 
 	last, err := C.db_last_block(conn.db)
 	return uint64(last), err
+}
+
+func (conn *Conn) Status() string {
+	conn.mu.RLock()
+	defer conn.mu.RUnlock()
+
+	size := 1024 // 1KB
+
+	buffer := (*C.char)(C.calloc(C.size_t(size), C.sizeof_char))
+	defer C.free(unsafe.Pointer(buffer))
+
+	C.db_status(conn.db, buffer, C.size_t(size))
+
+	return C.GoString(buffer)
 }

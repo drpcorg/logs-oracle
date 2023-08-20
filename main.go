@@ -8,10 +8,7 @@ import (
 	"log"
 	"math/big"
 	"net/http"
-	"sync"
-	"time"
 
-	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 
@@ -21,29 +18,106 @@ import (
 var (
 	addr               = flag.String("addr", ":8000", "address to serve")
 	endpoint           = flag.String("endpoint", "", "ethereum json rpc endpoint url")
-	dsn                = flag.String("dsn", "", "DSN for connect to ClickHouse")
+	data_dir           = flag.String("data-dir", "", "dir for save data")
 	crawler_batch      = flag.Uint64("crawler-batch", 512, "count of block for one request to node")
 	crawler_concurency = flag.Uint64("crawler-concurency", 64, "count of simultaneous requests to node")
 )
 
 type Filter struct {
-	BlockHash string     `json:"blockHash,omitempty"`
-	FromBlock string     `json:"fromBlock,omitempty"`
-	ToBlock   string     `json:"toBlock,omitempty"`
-	Address   []string   `json:"address,omitempty"`
-	Topics    [][]string `json:"topics,omitempty"`
+	FromBlock *string `json:"fromBlock"`
+	ToBlock   *string `json:"toBlock"`
+
+	Address interface{}   `json:"address"`
+	Topics  []interface{} `json:"topics"`
+}
+
+func (raw *Filter) ToQuery(latest uint64) (*db.Query, error) {
+	q, err := db.Query{}, (error)(nil)
+
+	// Block numbers
+	q.FromBlock, err = parseBlockNumber(raw.FromBlock, latest)
+	if err != nil {
+		return nil, fmt.Errorf("invalid record 'fromBlock'")
+	}
+
+	q.ToBlock, err = parseBlockNumber(raw.ToBlock, latest)
+	if err != nil {
+		return nil, fmt.Errorf("invalid record 'toBlock'")
+	}
+
+	if q.FromBlock > q.ToBlock {
+		return nil, fmt.Errorf("required fromBlock <= toBlock")
+	}
+
+	// Address
+	if raw.Address != nil {
+		switch r := raw.Address.(type) {
+		case []interface{}:
+			for i, addr := range r {
+				if str, ok := addr.(string); ok {
+					q.Addresses = append(q.Addresses, db.Address(common.HexToAddress(str)))
+				} else {
+					return nil, fmt.Errorf("non-string address at index %d", i)
+				}
+			}
+
+		case string:
+			q.Addresses = append(q.Addresses, db.Address(common.HexToAddress(r)))
+
+		default:
+			return nil, fmt.Errorf("invalid addresses in query")
+		}
+	}
+
+	// Topics
+	if raw.Topics != nil {
+		if len(raw.Topics) > 4 {
+			return nil, fmt.Errorf("allowed only 4 topic filters")
+		}
+
+		q.Topics = make([][]db.Hash, len(raw.Topics))
+
+		for i, t := range raw.Topics {
+			switch topic := t.(type) {
+			case nil:
+
+			case string:
+				q.Topics[i] = append(q.Topics[i], db.Hash(common.HexToHash(topic)))
+
+			case []interface{}:
+				// or case e.g. [null, "topic0", "topic1"]
+				for _, rawTopic := range topic {
+					if rawTopic == nil {
+						q.Topics[i] = nil // null component, match all
+						break
+					}
+
+					if topic, ok := rawTopic.(string); ok {
+						q.Topics[i] = append(q.Topics[i], db.Hash(common.HexToHash(topic)))
+					} else {
+						return nil, fmt.Errorf("invalid topic(s)")
+					}
+				}
+
+			default:
+				return nil, fmt.Errorf("invalid topic(s)")
+			}
+		}
+	}
+
+	return &q, nil
 }
 
 func main() {
 	flag.Parse()
-	if *dsn == "" {
-		log.Fatal("required -dsn")
+	if *data_dir == "" {
+		log.Fatal("required -data-dir")
 	}
 	if *endpoint == "" {
 		log.Fatal("required -endpoint")
 	}
 
-	db_conn, err := db.New(*dsn)
+	db_conn, err := db.NewDB(*data_dir)
 	if err != nil {
 		log.Fatal("failed to load db", err)
 	}
@@ -56,6 +130,10 @@ func main() {
 
 	go background(db_conn, eth)
 
+	http.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, db_conn.Status())
+	})
+
 	http.HandleFunc("/rpc", func(w http.ResponseWriter, r *http.Request) {
 		var filter Filter
 		if err := json.NewDecoder(r.Body).Decode(&filter); err != nil {
@@ -63,46 +141,26 @@ func main() {
 			return
 		}
 
-		// parse params
-		fromBlock, err := parseBlockNumber(eth, filter.FromBlock)
+		// TODO: don't fetch the node every request
+		latestBlock, err := eth.BlockNumber(context.Background())
 		if err != nil {
-			http.Error(w, "Invalid record 'fromBlock'", http.StatusBadRequest)
+			log.Println(err)
+
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 			return
 		}
 
-		toBlock, err := parseBlockNumber(eth, filter.ToBlock)
+		query, err := filter.ToQuery(latestBlock)
 		if err != nil {
-			http.Error(w, "Invalid record 'toBlock'", http.StatusBadRequest)
+			http.Error(w, fmt.Sprintf(`{"error":%v}`, err), http.StatusBadRequest)
 			return
 		}
 
-		addresses := make([]db.Address, len(filter.Address))
-		for i, adr := range filter.Address {
-			addresses[i] = db.Address(common.HexToAddress(adr))
-		}
-
-		topics := make([][]db.Hash, len(filter.Topics))
-		for i, item := range filter.Topics {
-			for _, topic := range item {
-				topics[i] = append(topics[i], db.Hash(common.HexToHash(topic)))
-			}
-		}
-
-		// validate params
-		if fromBlock.Cmp(&toBlock) == 1 {
-			http.Error(w, "required fromBlock <= toBlock", http.StatusBadRequest)
-			return
-		}
-
-		if len(topics) > 4 {
-			http.Error(w, "allowed only 4 topic filters", http.StatusBadRequest)
-			return
-		}
-
-		// calc count
-		count, err := db_conn.GetLogsCount(fromBlock, toBlock, addresses, topics)
+		count, err := db_conn.GetLogsCount(query)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			log.Println(err)
+
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 			return
 		}
 
@@ -113,117 +171,24 @@ func main() {
 	log.Fatal(http.ListenAndServe(*addr, nil))
 }
 
-func parseBlockNumber(eth *ethclient.Client, str string) (big.Int, error) {
-	var result big.Int
+func parseBlockNumber(str *string, latest uint64) (uint64, error) {
+	if str == nil {
+		return latest, nil
+	}
 
-	switch str {
+	switch *str {
+	case "earliest":
+		return 0, nil
+
 	// count approximately to the last block :)
-	case "", "earliest", "latest", "safe", "finalized", "pending":
-		value, err := eth.BlockNumber(context.Background())
-		if err != nil {
-			return result, err
-		}
-
-		result.SetUint64(value)
-		return result, nil
+	case "", "latest", "safe", "finalized", "pending":
+		return latest, nil
+	}
 
 	// parse hex string
-	default:
-		value, ok := new(big.Int).SetString(str, 0)
-		if !ok {
-			return result, fmt.Errorf("failed to parse the value")
-		}
-		return *value, nil
+	value, ok := new(big.Int).SetString(*str, 0)
+	if !ok {
+		return 0, fmt.Errorf("failed to parse the value")
 	}
-
-	return result, nil
-}
-
-func load_blocks(db_conn *db.Conn, eth *ethclient.Client, from, to uint64) (*[]db.Log, error) {
-	ethLogs, err := eth.FilterLogs(context.Background(), ethereum.FilterQuery{
-		FromBlock: new(big.Int).SetUint64(from),
-		ToBlock:   new(big.Int).SetUint64(to),
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	logs := make([]db.Log, len(ethLogs))
-	for i, log := range ethLogs {
-		logs[i].BlockNumber = log.BlockNumber
-		logs[i].Address = db.Address(log.Address.Bytes())
-
-		for j, topic := range log.Topics {
-			logs[i].Topics[j] = db.Hash(topic.Bytes())
-		}
-	}
-
-	return &logs, nil
-}
-
-func sync_node(db_conn *db.Conn, eth *ethclient.Client) error {
-	ctx := context.Background()
-
-	start, err := db_conn.GetLastBlock()
-	if err != nil {
-		return fmt.Errorf("get last indexed block: %v\n", err)
-	}
-
-	last, err := eth.BlockNumber(ctx)
-	if err != nil {
-		return fmt.Errorf("get last block from eth: %v\n", err)
-	}
-
-	from, to := start+1, start
-	for from <= last {
-		wg := sync.WaitGroup{}
-
-		data := make([](*[]db.Log), *crawler_concurency)
-		errors := make([]error, *crawler_concurency)
-
-		i := uint64(0)
-		for ; i < *crawler_concurency && from <= last; i++ {
-			to = from + *crawler_batch
-			if to > last {
-				to = last
-			}
-
-			wg.Add(1)
-			go func(i, from, to uint64) {
-				defer wg.Done()
-				data[i], errors[i] = load_blocks(db_conn, eth, from, to)
-			}(i, from, to)
-
-			from = to + 1
-		}
-
-		wg.Wait()
-
-		for j := uint64(0); j < *crawler_concurency; j++ {
-			if errors[j] != nil {
-				return fmt.Errorf("eth_getLogs: %v\n", errors[j])
-			}
-
-			if data[j] == nil {
-				continue
-			}
-
-			err := db_conn.Insert(*data[j])
-			if err != nil {
-				return fmt.Errorf("insert in db: %v\n", err)
-			}
-		}
-	}
-
-	return nil
-}
-
-func background(db_conn *db.Conn, eth *ethclient.Client) {
-	for ; ; time.Sleep(time.Minute) {
-		err := sync_node(db_conn, eth)
-		if err != nil { // ignore errors because we can continue to serve requests
-			log.Printf("failed sync with node: %v\n", err)
-			continue
-		}
-	}
+	return value.Uint64(), nil
 }
