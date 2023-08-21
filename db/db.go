@@ -1,12 +1,13 @@
 package db
 
 import (
+	"log"
 	"os"
 	"sync"
 	"unsafe"
-	"log"
 )
 
+// #cgo CFLAGS: -std=gnu11 -Wall -Wextra -Wwrite-strings -Wfloat-equal
 // #include "db.h"
 import "C"
 
