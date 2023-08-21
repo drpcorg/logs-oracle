@@ -43,10 +43,12 @@ void db_free_query(db_query_t *query) {
 
 bool _includes(uint64_t key, uint64_t *arr, size_t size) {
   while (size-- > 0)
-    if (arr[size-1] == key) return true;
+    if (arr[size] == key)
+      return true;
 
   return false;
 }
+
 void _read_manifest(db_t *db) {
   fseek(db->manifest, 0, SEEK_SET);
   fscanf(db->manifest, "%zd %zd %zd %zd", &db->blocks_count, &db->blocks_capacity, &db->logs_count, &db->logs_capacity);
@@ -151,9 +153,6 @@ void db_close(db_t *db) {
 
   fclose(db->manifest);
 
-  free(db->addresses);
-  free(db->topics);
-  free(db->blocks);
   free(db);
 
   db = NULL;
@@ -161,9 +160,10 @@ void db_close(db_t *db) {
 
 uint64_t db_query(db_t *db, db_query_t query) {
   // Prepare internal view
-  bool has_addresses = query.addresses.len > 0, has_topics = false;
+  bool has_addresses = query.addresses.len > 0,
+       has_topics    = false;
 
-  db_cell_address_t *addresses = NULL;
+  uint64_t *addresses = NULL;
   if (has_addresses) {
     addresses = (db_cell_address_t*)calloc(query.addresses.len, sizeof(db_cell_address_t));
 
@@ -172,7 +172,7 @@ uint64_t db_query(db_t *db, db_query_t query) {
     }
   }
 
-  uint64_t* topics[TOPICS_LENGTH] = {NULL};
+  uint64_t *topics[TOPICS_LENGTH] = {NULL};
   for (int i = 0; i < TOPICS_LENGTH; ++i) {
     topics[i] = (uint64_t*)calloc(query.topics[i].len, sizeof(uint64_t));
 
@@ -184,40 +184,47 @@ uint64_t db_query(db_t *db, db_query_t query) {
 
   // Get count
   uint64_t count = 0;
-  for (size_t bi = 0; bi < db->blocks_count; ++bi) {
-    db_block_t* st = &(db->blocks[bi]);
+  for (size_t block_index = 0; block_index < db->blocks_count; ++block_index) {
+    db_block_t* block = &(db->blocks[block_index]);
 
-    // TODO: search start block
-    if (st->number < query.from_block)
-      continue;
+    if (block->number < query.from_block) continue;
+    else if (block->number > query.to_block) break;
 
-    if (st->number > query.to_block)
-      break;
-
-    if (has_addresses == 0 && !has_topics) {
-      count += st->logs_count;
+    if (!has_addresses && !has_topics) {
+      count += block->logs_count;
       continue;
     }
 
-    for (size_t li = st->offset, end = st->offset + st->logs_count; li < end; ++li) {
-      bool a = !has_addresses, t = !has_topics;
+    for (
+      size_t start = block->offset,
+             end   = block->offset + block->logs_count;
+      start < end;
+      ++start
+    ) {
+      bool address_match = !has_addresses, topics_match = !has_topics;
 
       for (size_t j = 0; j < query.addresses.len; ++j) {
-        if (db->addresses[li] == addresses[j]) {
-          a = true;
+        if (db->addresses[start] == addresses[j]) {
+          address_match = true;
           break;
         }
       }
 
+      if (!address_match) continue;
+
       if (has_topics) {
-        t = true;
+        topics_match = true;
+
         for (size_t j = 0; j < TOPICS_LENGTH; ++j) {
-          if (topics[j] != NULL || query.topics[j].len == 0) continue;
-          t = t && _includes(db->topics[li][j], topics[j], query.topics[j].len);
+          if (query.topics[j].len > 0) {
+            topics_match = topics_match && _includes(db->topics[start][j], topics[j], query.topics[j].len);
+          }
         }
       }
 
-      if (a && t) ++count;
+      if (!topics_match) continue;
+
+      ++count;
     }
   }
 
@@ -297,9 +304,9 @@ void db_status(db_t *db, char *buffer, size_t len) {
     buffer, len,
 
     "dir: '%s'\n"
-    "last block:  %d\n"
-    "block_count: %d\n"
-    "logs_count:  %d\n",
+    "last block:  %" PRIu64 "\n"
+    "block_count: %" PRIu64 "\n"
+    "logs_count:  %" PRIu64 "\n",
 
     db->dir,
     db->blocks[db->blocks_count - 1].number,

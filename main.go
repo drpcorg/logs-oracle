@@ -156,7 +156,7 @@ func main() {
 			return
 		}
 
-		count, err := db_conn.GetLogsCount(query)
+		count, err := db_conn.Query(query)
 		if err != nil {
 			log.Println(err)
 

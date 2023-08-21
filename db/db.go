@@ -96,7 +96,7 @@ func (conn *Conn) Close() {
 	C.db_close(conn.db)
 }
 
-func (conn *Conn) GetLogsCount(query *Query) (uint64, error) {
+func (conn *Conn) Query(query *Query) (uint64, error) {
 	conn.mu.RLock()
 	defer conn.mu.RUnlock()
 

@@ -4,6 +4,7 @@
 #include <errno.h>
 #include <stdio.h>
 #include <stdint.h>
+#include <inttypes.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
@@ -12,6 +13,7 @@
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <stdbool.h>
+#include <assert.h>
 
 #include "murmur2.h"
 
@@ -56,6 +58,5 @@ uint64_t db_query     (db_t *db, db_query_t query);
 void     db_insert    (db_t *db, size_t size, db_log_t *logs);
 
 uint64_t db_last_block(db_t *db);
-
 
 #endif  // _DB_H
