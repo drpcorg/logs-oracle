@@ -11,7 +11,7 @@ import (
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/ethclient"
 
-	"vethin/db"
+	"drpc-logs-oracle/db"
 )
 
 func background(db_conn *db.Conn, eth *ethclient.Client) {

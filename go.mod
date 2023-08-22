@@ -1,4 +1,4 @@
-module vethin
+module drpc-logs-oracle
 
 go 1.20
 
