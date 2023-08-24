@@ -7,7 +7,7 @@ import (
 	"unsafe"
 )
 
-// #cgo CFLAGS: -std=gnu11 -Wall -Wextra -Wwrite-strings -Wfloat-equal
+// #cgo CFLAGS: -std=gnu11 -Wall -Wextra -Wwrite-strings -Wfloat-equal -O3 -march=native
 // #include "db.h"
 import "C"
 

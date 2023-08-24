@@ -266,39 +266,30 @@ inline bool _db_check_block_by_query(db_block_t* block, db_query_t* query) {
   return true;
 }
 
-inline bool _db_block_query(db_t* db,
+inline size_t _db_block_query(db_t* db,
                             db_block_t* block,
                             db_query_t* query,
                             db_cell_address_t* addresses,
                             size_t* topics[TOPICS_LENGTH]) {
   uint64_t count = 0;
 
-  size_t start = block->offset, end = start + block->logs_count;
-  for (; start < end; ++start) {
-    bool address_match = query->addresses.len == 0;
+  for (size_t i = block->offset, end = i + block->logs_count; i < end; ++i) {
+    if (query->addresses.len > 0 &&
+        !_includes(db->addresses[i], addresses, query->addresses.len)) {
+      continue;
+    }
 
-    for (size_t i = 0; i < query->addresses.len; ++i) {
-      if (db->addresses[start] == addresses[i]) {
-        address_match = true;
+    bool topics_match = true;
+    for (size_t j = 0; j < TOPICS_LENGTH; ++j) {
+      if (query->topics[j].len > 0 &&
+          !_includes(db->topics[i][j], topics[j], query->topics[j].len)) {
+        topics_match = false;
         break;
       }
     }
 
-    if (!address_match)
-      continue;
-
-    bool topics_match = true;
-    for (size_t i = 0; i < TOPICS_LENGTH; ++i) {
-      if (query->topics[i].len < 1) continue;
-      topics_match =
-        topics_match &&
-        _includes(db->topics[start][i], topics[i], query->topics[i].len);
-    }
-
-    if (!topics_match)
-      continue;
-
-    ++count;
+    if (topics_match)
+      ++count;
   }
 
   return count;
@@ -331,23 +322,20 @@ uint64_t db_query(db_t* db, db_query_t query) {
   }
 
   // Get count
+  uint64_t start = query.from_block,
+           end = min(db->current_block, query.to_block);
+
   uint64_t count = 0;
-  for (size_t number = query.from_block;
-       number <= min(db->current_block, query.to_block); ++number) {
+  for (size_t number = start; number <= end; ++number) {
     db_block_t* block = &(db->blocks[number]);
 
-    if (block->logs_count < 1)
-      continue;
-
-    if (!has_addresses && !has_topics) {
-      count += block->logs_count;
-      continue;
+    if (block->logs_count != 0) {
+      if (!has_addresses && !has_topics) {
+        count += block->logs_count;
+      } else if (_db_check_block_by_query(block, &query)) {
+        count += _db_block_query(db, block, &query, addresses, topics);
+      }
     }
-
-    if (!_db_check_block_by_query(block, &query))
-      continue;
-
-    count += _db_block_query(db, block, &query, addresses, topics);
   }
 
   if (addresses != NULL)

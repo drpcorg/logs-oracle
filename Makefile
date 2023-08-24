@@ -1,5 +1,5 @@
 release:
-	CC=clang CGO_CFLAGS='-Ofast' go build .
+	go build .
 
 format:
 	go fmt ./...
