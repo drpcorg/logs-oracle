@@ -20,7 +20,7 @@ var (
 	endpoint           = flag.String("endpoint", "", "ethereum json rpc endpoint url")
 	data_dir           = flag.String("data-dir", "", "dir for save data")
 	crawler_batch      = flag.Uint64("crawler-batch", 512, "count of block for one request to node")
-	crawler_concurency = flag.Uint64("crawler-concurency", 64, "count of simultaneous requests to node")
+	crawler_concurency = flag.Uint64("crawler-concurency", 8, "count of simultaneous requests to node")
 )
 
 type Filter struct {
