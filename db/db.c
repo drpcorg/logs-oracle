@@ -5,35 +5,99 @@
 
 #define STORE_BLOCKS_RESERVE_STEP 10000
 #define STORE_LOGS_RESERVE_STEP 10000
+
 #define STORE_SIZE (2ul << 40)  // bytes
+#define LOGS_BLOOM_SIZE 256
 
 #define ERR_DIR_TOO_LONG 1
 #define ERR_PREVIOUS_BLOCK 2
 #define ERR_FAIL_OPEN_FILES 3
 #define ERR_FAILED_REALLOC_FILE 5
 
+#define min(a, b)           \
+  ({                        \
+    __typeof__(a) _a = (a); \
+    __typeof__(b) _b = (b); \
+    _a < _b ? _a : _b;      \
+  })
+
+#define max(a, b)           \
+  ({                        \
+    __typeof__(a) _a = (a); \
+    __typeof__(b) _b = (b); \
+    _a > _b ? _a : _b;      \
+  })
+
 typedef uint64_t db_cell_address_t;
-typedef uint64_t db_cell_topics_t[TOPICS_LENGTH];
+typedef uint64_t db_cell_topic_t[TOPICS_LENGTH];
+
+typedef uint8_t db_bloom_t[LOGS_BLOOM_SIZE];
 
 typedef struct {
-  uint64_t number, logs_count, offset;
+  // block_number - index in parrent storage
+  uint64_t logs_count, offset;
+  db_bloom_t logs_bloom;
 } db_block_t;
+
+bool db_block_bloom_check_or_add(db_bloom_t* bloom, uint8_t* hash, bool add) {
+  uint32_t mask = (1UL << 11UL) - 1;
+  uint32_t a = 0, b = 0, c = 0;
+
+  a = mask - ((((uint32_t)(hash[1]) << 8) + hash[0]) & mask);
+  b = mask - ((((uint32_t)(hash[3]) << 8) + hash[2]) & mask);
+  c = mask - ((((uint32_t)(hash[5]) << 8) + hash[4]) & mask);
+
+  uint8_t ai = a / 8, av = 1 << (7 - (a % 8));
+  uint8_t bi = b / 8, bv = 1 << (7 - (b % 8));
+  uint8_t ci = c / 8, cv = 1 << (7 - (c % 8));
+
+  if (add) {
+    (*bloom)[ai] |= av;
+    (*bloom)[bi] |= bv;
+    (*bloom)[ci] |= cv;
+
+    return false;
+  } else {
+    return ((*bloom)[ai] & av) && ((*bloom)[bi] & bv) && ((*bloom)[ci] & cv);
+  }
+}
+
+inline void db_block_bloom_add(db_bloom_t* bloom, uint8_t* hash) {
+  db_block_bloom_check_or_add(bloom, hash, true);
+}
+
+inline bool db_block_bloom_check(db_bloom_t* bloom, uint8_t* hash) {
+  return db_block_bloom_check_or_add(bloom, hash, false);
+}
+
+inline bool db_block_bloom_check_array(db_bloom_t* bloom,
+                                       uint8_t** hashes,
+                                       size_t size) {
+  while (size-- > 0)
+    if (db_block_bloom_check(bloom, hashes[size]))
+      return true;
+
+  return false;
+}
 
 struct db {
   char dir[MAX_FILE_LENGTH];
 
-  size_t blocks_count, blocks_capacity;
+  size_t current_block, blocks_capacity;
   size_t logs_count, logs_capacity;
 
   FILE* manifest;
   int blocks_fd, addresses_fd, topics_fd;
 
+  // blocks index
   db_block_t* blocks;
+
+  // memory areas for raw cells
   db_cell_address_t* addresses;
-  db_cell_topics_t* topics;
+  db_cell_topic_t* topics;
 };
 
-void db_free_query(db_query_t* query) {
+void _db_free_query(db_query_t* query) {
   free(query->addresses.data);
 
   for (int i = 0; i < TOPICS_LENGTH; ++i) {
@@ -41,7 +105,7 @@ void db_free_query(db_query_t* query) {
   }
 }
 
-bool _includes(uint64_t key, uint64_t* arr, size_t size) {
+inline bool _includes(uint64_t key, uint64_t* arr, size_t size) {
   while (size-- > 0)
     if (arr[size] == key)
       return true;
@@ -49,15 +113,15 @@ bool _includes(uint64_t key, uint64_t* arr, size_t size) {
   return false;
 }
 
-void _read_manifest(db_t* db) {
+inline void _read_manifest(db_t* db) {
   fseek(db->manifest, 0, SEEK_SET);
-  fscanf(db->manifest, "%zd %zd %zd %zd", &db->blocks_count,
+  fscanf(db->manifest, "%zd %zd %zd %zd", &db->current_block,
          &db->blocks_capacity, &db->logs_count, &db->logs_capacity);
 }
 
-void _write_manifest(db_t* db) {
+inline void _write_manifest(db_t* db) {
   fseek(db->manifest, 0, SEEK_SET);
-  fprintf(db->manifest, "%zd %zd %zd %zd", db->blocks_count,
+  fprintf(db->manifest, "%zd %zd %zd %zd", db->current_block,
           db->blocks_capacity, db->logs_count, db->logs_capacity);
 }
 
@@ -106,8 +170,8 @@ db_t* db_new(char* dir) {
                              STORE_BLOCKS_RESERVE_STEP * sizeof(db_block_t));
   db->addresses_fd = _open_file(
       db, "addresses.bin", STORE_LOGS_RESERVE_STEP * sizeof(db_cell_address_t));
-  db->topics_fd = _open_file(
-      db, "topics.bin", STORE_LOGS_RESERVE_STEP * sizeof(db_cell_topics_t));
+  db->topics_fd = _open_file(db, "topics.bin",
+                             STORE_LOGS_RESERVE_STEP * sizeof(db_cell_topic_t));
 
   if (db->blocks_fd < 0 || db->addresses_fd < 0 || db->topics_fd < 0) {
     errno = ERR_FAIL_OPEN_FILES;
@@ -119,12 +183,11 @@ db_t* db_new(char* dir) {
   db->addresses =
       (db_cell_address_t*)mmap(NULL, STORE_SIZE, PROT_READ | PROT_WRITE,
                                MAP_SHARED, db->addresses_fd, 0);
-  db->topics = (db_cell_topics_t*)mmap(NULL, STORE_SIZE, PROT_READ | PROT_WRITE,
-                                       MAP_SHARED, db->topics_fd, 0);
+  db->topics = (db_cell_topic_t*)mmap(NULL, STORE_SIZE, PROT_READ | PROT_WRITE,
+                                      MAP_SHARED, db->topics_fd, 0);
 
   // alloc blocks index
-  db->blocks_count = 1;
-  db->blocks[0].number = 0;
+  db->current_block = 0;
   db->blocks[0].logs_count = 0;
   db->blocks[0].offset = 0;
 
@@ -167,24 +230,98 @@ void db_close(db_t* db) {
   db = NULL;
 }
 
+inline bool _db_check_block_by_query(db_block_t* block, db_query_t* query) {
+  if (query->addresses.len > 0) {
+    bool has = false;
+
+    for (size_t i = 0; i < query->addresses.len; ++i) {
+      if (db_block_bloom_check(&(block->logs_bloom),
+                               query->addresses.data[i])) {
+        has = true;
+        break;
+      }
+    }
+
+    if (!has)
+      return false;
+  }
+
+  for (size_t i = 0; i < TOPICS_LENGTH; ++i) {
+    bool current_has = false;
+
+    if (query->topics[i].len < 1)
+      continue;
+
+    for (size_t size = 0; size < query->topics[i].len; ++size)
+      if (db_block_bloom_check(&(block->logs_bloom),
+                               query->topics[i].data[size])) {
+        current_has = true;
+        break;
+      }
+
+    if (!current_has)
+      return false;
+  }
+
+  return true;
+}
+
+inline bool _db_block_query(db_t* db,
+                            db_block_t* block,
+                            db_query_t* query,
+                            db_cell_address_t* addresses,
+                            size_t* topics[TOPICS_LENGTH]) {
+  uint64_t count = 0;
+
+  size_t start = block->offset, end = start + block->logs_count;
+  for (; start < end; ++start) {
+    bool address_match = query->addresses.len == 0;
+
+    for (size_t i = 0; i < query->addresses.len; ++i) {
+      if (db->addresses[start] == addresses[i]) {
+        address_match = true;
+        break;
+      }
+    }
+
+    if (!address_match)
+      continue;
+
+    bool topics_match = true;
+    for (size_t i = 0; i < TOPICS_LENGTH; ++i) {
+      if (query->topics[i].len < 1) continue;
+      topics_match =
+        topics_match &&
+        _includes(db->topics[start][i], topics[i], query->topics[i].len);
+    }
+
+    if (!topics_match)
+      continue;
+
+    ++count;
+  }
+
+  return count;
+}
+
 uint64_t db_query(db_t* db, db_query_t query) {
   // Prepare internal view
   bool has_addresses = query.addresses.len > 0, has_topics = false;
 
-  uint64_t* addresses = NULL;
+  db_cell_address_t* addresses = NULL;
   if (has_addresses) {
     addresses = (db_cell_address_t*)calloc(query.addresses.len,
                                            sizeof(db_cell_address_t));
 
-    for (size_t j = 0; j < query.addresses.len; ++j) {
-      addresses[j] =
-          murmur64A(query.addresses.data[j], sizeof(db_address_t), HASH_SEED);
+    for (size_t i = 0; i < query.addresses.len; ++i) {
+      addresses[i] =
+          murmur64A(query.addresses.data[i], sizeof(db_address_t), HASH_SEED);
     }
   }
 
-  uint64_t* topics[TOPICS_LENGTH] = {NULL};
+  size_t* topics[TOPICS_LENGTH] = {NULL};
   for (int i = 0; i < TOPICS_LENGTH; ++i) {
-    topics[i] = (uint64_t*)calloc(query.topics[i].len, sizeof(uint64_t));
+    topics[i] = (size_t*)calloc(query.topics[i].len, sizeof(size_t));
 
     for (size_t j = 0; j < query.topics[i].len; ++j) {
       has_topics = true;
@@ -195,50 +332,22 @@ uint64_t db_query(db_t* db, db_query_t query) {
 
   // Get count
   uint64_t count = 0;
-  for (size_t block_index = 0; block_index < db->blocks_count; ++block_index) {
-    db_block_t* block = &(db->blocks[block_index]);
+  for (size_t number = query.from_block;
+       number <= min(db->current_block, query.to_block); ++number) {
+    db_block_t* block = &(db->blocks[number]);
 
-    if (block->number < query.from_block)
+    if (block->logs_count < 1)
       continue;
-    else if (block->number > query.to_block)
-      break;
 
     if (!has_addresses && !has_topics) {
       count += block->logs_count;
       continue;
     }
 
-    for (size_t start = block->offset, end = block->offset + block->logs_count;
-         start < end; ++start) {
-      bool address_match = !has_addresses, topics_match = !has_topics;
+    if (!_db_check_block_by_query(block, &query))
+      continue;
 
-      for (size_t j = 0; j < query.addresses.len; ++j) {
-        if (db->addresses[start] == addresses[j]) {
-          address_match = true;
-          break;
-        }
-      }
-
-      if (!address_match)
-        continue;
-
-      if (has_topics) {
-        topics_match = true;
-
-        for (size_t j = 0; j < TOPICS_LENGTH; ++j) {
-          if (query.topics[j].len > 0) {
-            topics_match =
-                topics_match &&
-                _includes(db->topics[start][j], topics[j], query.topics[j].len);
-          }
-        }
-      }
-
-      if (!topics_match)
-        continue;
-
-      ++count;
-    }
+    count += _db_block_query(db, block, &query, addresses, topics);
   }
 
   if (addresses != NULL)
@@ -248,25 +357,27 @@ uint64_t db_query(db_t* db, db_query_t query) {
     if (topics[i] != NULL)
       free(topics[i]);
 
-  db_free_query(&query);
+  _db_free_query(&query);
 
   return count;
 }
 
 void db_insert(db_t* db, size_t size, db_log_t* logs) {
   for (size_t i = 0; i < size; ++i) {
-    db_block_t* last_block = &(db->blocks[db->blocks_count - 1]);
-
     // store is immutable, operation not supported
-    if (last_block->number > logs[i].block_number) {
+    if (db->current_block > logs[i].block_number) {
       errno = ERR_PREVIOUS_BLOCK;
       return;
     }
 
     // add new block
-    if (last_block->number < logs[i].block_number) {
-      if (db->blocks_capacity == db->blocks_count) {
-        db->blocks_capacity += STORE_BLOCKS_RESERVE_STEP;
+    if (db->current_block < logs[i].block_number) {
+      db_block_t* last = &(db->blocks[db->current_block]);
+
+      db->current_block = logs[i].block_number;
+
+      if (db->blocks_capacity <= db->current_block) {
+        db->blocks_capacity = db->current_block + STORE_BLOCKS_RESERVE_STEP;
 
         if (ftruncate(db->blocks_fd,
                       db->blocks_capacity * sizeof(db_block_t)) != 0) {
@@ -275,15 +386,11 @@ void db_insert(db_t* db, size_t size, db_log_t* logs) {
         }
       }
 
-      db->blocks[db->blocks_count].number = logs[i].block_number;
-      db->blocks[db->blocks_count].logs_count = 0;
-      db->blocks[db->blocks_count].offset =
-          last_block->offset + last_block->logs_count;
-
-      db->blocks_count++;
-      last_block++;
+      db->blocks[db->current_block].logs_count = 0;
+      db->blocks[db->current_block].offset = last->offset + last->logs_count;
     }
 
+    // resize addreses and topics store
     if (db->logs_capacity == db->logs_count) {
       db->logs_capacity += STORE_LOGS_RESERVE_STEP;
 
@@ -296,15 +403,19 @@ void db_insert(db_t* db, size_t size, db_log_t* logs) {
       }
     }
 
+    db_block_t* current_block = &(db->blocks[db->current_block]);
+
+    db_block_bloom_add(&(current_block->logs_bloom), logs[i].address);
     db->addresses[db->logs_count] =
         murmur64A(logs[i].address, sizeof(db_address_t), HASH_SEED);
 
     for (size_t j = 0; j < 4; ++j) {
+      db_block_bloom_add(&(current_block->logs_bloom), logs[i].topics[j]);
       db->topics[db->logs_count][j] =
           murmur64A(logs[i].topics[j], sizeof(db_hash_t), HASH_SEED);
     }
 
-    last_block->logs_count++;
+    current_block->logs_count++;
     db->logs_count++;
   }
 
@@ -312,19 +423,15 @@ void db_insert(db_t* db, size_t size, db_log_t* logs) {
 }
 
 uint64_t db_last_block(db_t* db) {
-  return db->blocks[db->blocks_count - 1].number;
+  return db->current_block;
 }
 
 void db_status(db_t* db, char* buffer, size_t len) {
   snprintf(buffer, len,
 
            "dir: '%s'\n"
-           "last block:  %" PRIu64
-           "\n"
-           "block_count: %" PRIu64
-           "\n"
-           "logs_count:  %" PRIu64 "\n",
+           "block_count: %lu\n"
+           "logs_count:  %lu\n",
 
-           db->dir, db->blocks[db->blocks_count - 1].number, db->blocks_count,
-           db->logs_count);
+           db->dir, db->current_block, db->logs_count);
 }

@@ -31,7 +31,6 @@ inline uint64_t murmur64A(const void* key, const int len, const uint32_t seed) {
 
   const uint8_t* data2 = (const uint8_t*)data;
 
-  
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wimplicit-fallthrough"
   switch (len & 7) {
