@@ -41,12 +41,12 @@ func sync_node(db_conn *db.Conn, eth *ethclient.Client) error {
 	for from <= last {
 		wg := sync.WaitGroup{}
 
-		data := make([](*[]db.Log), *crawler_concurency)
-		errors := make([]error, *crawler_concurency)
+		data := make([](*[]db.Log), *rpc_concurency)
+		errors := make([]error, *rpc_concurency)
 
 		i := uint64(0)
-		for ; i < *crawler_concurency && from <= last; i++ {
-			to = from + *crawler_batch
+		for ; i < *rpc_concurency && from <= last; i++ {
+			to = from + *rpc_batch
 			if to > last {
 				to = last
 			}
@@ -62,7 +62,7 @@ func sync_node(db_conn *db.Conn, eth *ethclient.Client) error {
 
 		wg.Wait()
 
-		for j := uint64(0); j < *crawler_concurency; j++ {
+		for j := uint64(0); j < *rpc_concurency; j++ {
 			if errors[j] != nil {
 				return fmt.Errorf("eth_getLogs: %v\n", errors[j])
 			}

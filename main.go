@@ -16,11 +16,13 @@ import (
 )
 
 var (
-	addr               = flag.String("addr", ":8000", "address to serve")
-	endpoint           = flag.String("endpoint", "", "ethereum json rpc endpoint url")
-	data_dir           = flag.String("data-dir", "", "dir for save data")
-	crawler_batch      = flag.Uint64("crawler-batch", 512, "count of block for one request to node")
-	crawler_concurency = flag.Uint64("crawler-concurency", 8, "count of simultaneous requests to node")
+	addr         = flag.String("addr", ":8000", "address to serve")
+	data_dir     = flag.String("data-dir", "", "dir for save data")
+	buffer_limit = flag.String("buffer-limit", "16GB", "RAM limit for disk cache")
+
+	rpc_endpoint   = flag.String("rpc-endpoint", "", "ethereum json rpc endpoint url")
+	rpc_batch      = flag.Uint64("rpc-batch", 512, "count of block for one request to node")
+	rpc_concurency = flag.Uint64("rpc-concurency", 8, "count of simultaneous requests to node")
 )
 
 type Filter struct {
@@ -113,17 +115,17 @@ func main() {
 	if *data_dir == "" {
 		log.Fatal("required -data-dir")
 	}
-	if *endpoint == "" {
-		log.Fatal("required -endpoint")
+	if *rpc_endpoint == "" {
+		log.Fatal("required -rpc-endpoint")
 	}
 
 	db_conn, err := db.NewDB(*data_dir)
 	if err != nil {
-		log.Fatal("failed to load db", err)
+		log.Fatal("failed to load db: ", err)
 	}
 	defer db_conn.Close()
 
-	eth, err := ethclient.DialContext(context.Background(), *endpoint)
+	eth, err := ethclient.DialContext(context.Background(), *rpc_endpoint)
 	if err != nil {
 		log.Fatal(err)
 	}

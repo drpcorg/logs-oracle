@@ -81,7 +81,7 @@ func NewDB(data_dir string) (*Conn, error) {
 	data_dir_cstr := C.CString(data_dir)
 	defer C.free(unsafe.Pointer(data_dir_cstr))
 
-	err := os.MkdirAll(data_dir, 0750)
+	err := os.MkdirAll(data_dir, 0600)
 	if err != nil {
 		return nil, err
 	}
