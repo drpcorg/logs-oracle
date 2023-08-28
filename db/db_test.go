@@ -42,7 +42,7 @@ func makeDB(t *testing.T) *Conn {
 	dir := t.TempDir()
 
 	// create DB
-	conn, err := NewDB(dir)
+	conn, err := NewDB(dir, 0)
 	require.NoError(t, err, "new db")
 
 	return conn

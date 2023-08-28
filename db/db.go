@@ -77,16 +77,16 @@ type Conn struct {
 	db *C.db_t
 }
 
-func NewDB(data_dir string) (*Conn, error) {
+func NewDB(data_dir string, ram_limit uint64) (*Conn, error) {
 	data_dir_cstr := C.CString(data_dir)
 	defer C.free(unsafe.Pointer(data_dir_cstr))
 
-	err := os.MkdirAll(data_dir, 0600)
+	err := os.MkdirAll(data_dir, 0755)
 	if err != nil {
 		return nil, err
 	}
 
-	db, err := C.db_new(data_dir_cstr)
+	db, err := C.db_new(data_dir_cstr, C.uint64_t(ram_limit))
 	return &Conn{db: db}, err
 }
 
@@ -94,7 +94,7 @@ func (conn *Conn) Close() {
 	conn.mu.Lock()
 	defer conn.mu.Unlock()
 
-	C.db_close(conn.db)
+	C.db_free(conn.db)
 }
 
 func (conn *Conn) Query(query *Query) (uint64, error) {
@@ -126,7 +126,7 @@ func (conn *Conn) GetLastBlock() (uint64, error) {
 	conn.mu.RLock()
 	defer conn.mu.RUnlock()
 
-	last, err := C.db_last_block(conn.db)
+	last, err := C.db_current_block(conn.db)
 	return uint64(last), err
 }
 

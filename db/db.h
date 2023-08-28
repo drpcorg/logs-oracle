@@ -15,13 +15,10 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#include "murmur2.h"
-
 #define MAX_FILE_LENGTH 256
 
 #define HASH_LENGTH 32
 #define ADDRESS_LENGTH 20
-
 #define TOPICS_LENGTH 4
 
 typedef uint8_t db_hash_t[HASH_LENGTH];
@@ -50,13 +47,13 @@ typedef struct {
 struct db;
 typedef struct db db_t;
 
-db_t* db_new(char* dir);
-void db_close(db_t* db);
+db_t* db_new(char* dir, uint64_t ram_limit);
+void db_free(db_t* db);
 void db_status(db_t* db, char* buffer, size_t len);
 
 uint64_t db_query(db_t* db, db_query_t query);
 void db_insert(db_t* db, size_t size, db_log_t* logs);
 
-uint64_t db_last_block(db_t* db);
+uint64_t db_current_block(db_t* db);
 
 #endif  // _DB_H

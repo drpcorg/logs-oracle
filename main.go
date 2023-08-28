@@ -8,6 +8,8 @@ import (
 	"log"
 	"math/big"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -119,7 +121,12 @@ func main() {
 		log.Fatal("required -rpc-endpoint")
 	}
 
-	db_conn, err := db.NewDB(*data_dir)
+	ram_limit, err := datasizeParse(*buffer_limit)
+	if err != nil {
+		log.Fatal("invalid -buffer-limit")
+	}
+
+	db_conn, err := db.NewDB(*data_dir, ram_limit)
 	if err != nil {
 		log.Fatal("failed to load db: ", err)
 	}
@@ -193,4 +200,40 @@ func parseBlockNumber(str *string, latest uint64) (uint64, error) {
 		return 0, fmt.Errorf("failed to parse the value")
 	}
 	return value.Uint64(), nil
+}
+
+func datasizeParse(raw string) (uint64, error) {
+	var val uint64
+
+	i := 0
+	for ; i < len(raw) && '0' <= raw[i] && raw[i] <= '9'; i++ {
+		val = val*10 + uint64(raw[i]-'0')
+	}
+	if i == 0 {
+		return 0, &strconv.NumError{"UnmarshalText", raw, strconv.ErrSyntax}
+	}
+
+	unit := strings.ToLower(strings.TrimSpace(raw[i:]))
+	switch unit {
+	case "", "b", "byte":
+		// do nothing - already in bytes
+
+	case "k", "kb", "kilo", "kilobyte", "kilobytes":
+		val *= 1 << 10
+	case "m", "mb", "mega", "megabyte", "megabytes":
+		val *= 1 << 20
+	case "g", "gb", "giga", "gigabyte", "gigabytes":
+		val *= 1 << 30
+	case "t", "tb", "tera", "terabyte", "terabytes":
+		val *= 1 << 40
+	case "p", "pb", "peta", "petabyte", "petabytes":
+		val *= 1 << 50
+	case "E", "EB", "e", "eb", "eB":
+		val *= 1 << 60
+
+	default:
+		return 0, &strconv.NumError{"UnmarshalText", raw, strconv.ErrSyntax}
+	}
+
+	return val, nil
 }
