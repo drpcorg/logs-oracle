@@ -144,17 +144,24 @@ func main() {
 	})
 
 	http.HandleFunc("/rpc", func(w http.ResponseWriter, r *http.Request) {
-		var filter Filter
-		if err := json.NewDecoder(r.Body).Decode(&filter); err != nil {
+		var filters []Filter
+		if err := json.NewDecoder(r.Body).Decode(&filters); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+
+		if len(filters) != 1 {
+			log.Println(err)
+			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+			return
+		}
+
+		filter := filters[0]
 
 		// TODO: don't fetch the node every request
 		latestBlock, err := eth.BlockNumber(context.Background())
 		if err != nil {
 			log.Println(err)
-
 			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 			return
 		}
