@@ -8,8 +8,6 @@ import (
 	"log"
 	"math/big"
 	"net/http"
-	"strconv"
-	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -17,22 +15,35 @@ import (
 	"drpc-logs-oracle/db"
 )
 
-var (
-	addr         = flag.String("addr", ":8000", "address to serve")
-	data_dir     = flag.String("data-dir", "", "dir for save data")
-	buffer_limit = flag.String("buffer-limit", "16GB", "RAM limit for disk cache")
-
-	rpc_endpoint   = flag.String("rpc-endpoint", "", "ethereum json rpc endpoint url")
-	rpc_batch      = flag.Uint64("rpc-batch", 512, "count of block for one request to node")
-	rpc_concurency = flag.Uint64("rpc-concurency", 8, "count of simultaneous requests to node")
-)
-
+// Filters
 type Filter struct {
 	FromBlock *string `json:"fromBlock"`
 	ToBlock   *string `json:"toBlock"`
 
 	Address interface{}   `json:"address"`
 	Topics  []interface{} `json:"topics"`
+}
+
+func parseBlockNumber(str *string, latest uint64) (uint64, error) {
+	if str == nil {
+		return latest, nil
+	}
+
+	switch *str {
+	case "earliest":
+		return 0, nil
+
+	// count approximately to the last block :)
+	case "", "latest", "safe", "finalized", "pending":
+		return latest, nil
+	}
+
+	// parse hex string
+	value, ok := new(big.Int).SetString(*str, 0)
+	if !ok {
+		return 0, fmt.Errorf("failed to parse the value")
+	}
+	return value.Uint64(), nil
 }
 
 func (raw *Filter) ToQuery(latest uint64) (*db.Query, error) {
@@ -112,32 +123,37 @@ func (raw *Filter) ToQuery(latest uint64) (*db.Query, error) {
 	return &q, nil
 }
 
+type App struct {
+	Config     *Config
+	DataClient *db.Conn
+	NodeClient *ethclient.Client
+}
+
 func main() {
 	flag.Parse()
-	if *data_dir == "" {
-		log.Fatal("required -data-dir")
-	}
-	if *rpc_endpoint == "" {
-		log.Fatal("required -rpc-endpoint")
+	config, err := LoadConfig()
+	if err != nil {
+		log.Fatal("Couldn't parse config", err)
 	}
 
-	ram_limit, err := datasizeParse(*buffer_limit)
+	db_conn, err := db.NewDB(config.DataDir, uint64(config.RamLimit))
 	if err != nil {
-		log.Fatal("invalid -buffer-limit")
-	}
-
-	db_conn, err := db.NewDB(*data_dir, ram_limit)
-	if err != nil {
-		log.Fatal("failed to load db: ", err)
+		log.Fatal("Couldn't load db: ", err)
 	}
 	defer db_conn.Close()
 
-	eth, err := ethclient.DialContext(context.Background(), *rpc_endpoint)
+	eth, err := ethclient.DialContext(context.Background(), config.NodeAddr)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal("Couln't connect to node: ", err)
 	}
 
-	go background(db_conn, eth)
+	app := &App{
+		Config:     &config,
+		DataClient: db_conn,
+		NodeClient: eth,
+	}
+
+	go background(app)
 
 	http.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, db_conn.Status())
@@ -184,63 +200,5 @@ func main() {
 		fmt.Fprintf(w, `{"result":%d}`+"\n", count)
 	})
 
-	log.Fatal(http.ListenAndServe(*addr, nil))
-}
-
-func parseBlockNumber(str *string, latest uint64) (uint64, error) {
-	if str == nil {
-		return latest, nil
-	}
-
-	switch *str {
-	case "earliest":
-		return 0, nil
-
-	// count approximately to the last block :)
-	case "", "latest", "safe", "finalized", "pending":
-		return latest, nil
-	}
-
-	// parse hex string
-	value, ok := new(big.Int).SetString(*str, 0)
-	if !ok {
-		return 0, fmt.Errorf("failed to parse the value")
-	}
-	return value.Uint64(), nil
-}
-
-func datasizeParse(raw string) (uint64, error) {
-	var val uint64
-
-	i := 0
-	for ; i < len(raw) && '0' <= raw[i] && raw[i] <= '9'; i++ {
-		val = val*10 + uint64(raw[i]-'0')
-	}
-	if i == 0 {
-		return 0, &strconv.NumError{"UnmarshalText", raw, strconv.ErrSyntax}
-	}
-
-	unit := strings.ToLower(strings.TrimSpace(raw[i:]))
-	switch unit {
-	case "", "b", "byte":
-		// do nothing - already in bytes
-
-	case "k", "kb", "kilo", "kilobyte", "kilobytes":
-		val *= 1 << 10
-	case "m", "mb", "mega", "megabyte", "megabytes":
-		val *= 1 << 20
-	case "g", "gb", "giga", "gigabyte", "gigabytes":
-		val *= 1 << 30
-	case "t", "tb", "tera", "terabyte", "terabytes":
-		val *= 1 << 40
-	case "p", "pb", "peta", "petabyte", "petabytes":
-		val *= 1 << 50
-	case "E", "EB", "e", "eb", "eB":
-		val *= 1 << 60
-
-	default:
-		return 0, &strconv.NumError{"UnmarshalText", raw, strconv.ErrSyntax}
-	}
-
-	return val, nil
+	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", config.BindPort), nil))
 }

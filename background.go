@@ -14,9 +14,9 @@ import (
 	"drpc-logs-oracle/db"
 )
 
-func background(db_conn *db.Conn, eth *ethclient.Client) {
+func background(app *App) {
 	for ; ; time.Sleep(time.Minute) {
-		err := sync_node(db_conn, eth)
+		err := sync_node(app)
 		if err != nil { // ignore errors because we can continue to serve requests
 			log.Printf("failed sync with node: %v\n", err)
 			continue
@@ -24,29 +24,31 @@ func background(db_conn *db.Conn, eth *ethclient.Client) {
 	}
 }
 
-func sync_node(db_conn *db.Conn, eth *ethclient.Client) error {
+func sync_node(app *App) error {
 	ctx := context.Background()
 
-	start, err := db_conn.GetLastBlock()
+	start, err := app.DataClient.GetLastBlock()
 	if err != nil {
 		return fmt.Errorf("get last indexed block: %v\n", err)
 	}
 
-	last, err := eth.BlockNumber(ctx)
+	last, err := app.NodeClient.BlockNumber(ctx)
 	if err != nil {
 		return fmt.Errorf("get last block from eth: %v\n", err)
 	}
 
-	from, to := start+1, start
+	batch, concurency := app.Config.NodeBatch, app.Config.NodeConcurency
+
+	from, to := start, start
 	for from <= last {
 		wg := sync.WaitGroup{}
 
-		data := make([](*[]db.Log), *rpc_concurency)
-		errors := make([]error, *rpc_concurency)
+		data := make([](*[]db.Log), concurency)
+		errors := make([]error, concurency)
 
 		i := uint64(0)
-		for ; i < *rpc_concurency && from <= last; i++ {
-			to = from + *rpc_batch
+		for ; i < concurency && from <= last; i++ {
+			to = from + batch
 			if to > last {
 				to = last
 			}
@@ -54,7 +56,7 @@ func sync_node(db_conn *db.Conn, eth *ethclient.Client) error {
 			wg.Add(1)
 			go func(i, from, to uint64) {
 				defer wg.Done()
-				data[i], errors[i] = load_blocks(db_conn, eth, from, to)
+				data[i], errors[i] = load_blocks(app.DataClient, app.NodeClient, from, to)
 			}(i, from, to)
 
 			from = to + 1
@@ -62,7 +64,7 @@ func sync_node(db_conn *db.Conn, eth *ethclient.Client) error {
 
 		wg.Wait()
 
-		for j := uint64(0); j < *rpc_concurency; j++ {
+		for j := uint64(0); j < concurency; j++ {
 			if errors[j] != nil {
 				return fmt.Errorf("eth_getLogs: %v\n", errors[j])
 			}
@@ -71,7 +73,7 @@ func sync_node(db_conn *db.Conn, eth *ethclient.Client) error {
 				continue
 			}
 
-			err := db_conn.Insert(*data[j])
+			err := app.DataClient.Insert(*data[j])
 			if err != nil {
 				return fmt.Errorf("insert in db: %v\n", err)
 			}
