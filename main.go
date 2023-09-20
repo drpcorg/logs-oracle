@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"time"
+	"sync/atomic"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -22,33 +23,101 @@ import (
 	"drpc-logs-oracle/db"
 )
 
+var (
+	SafeBlockNumber      = big.NewInt(-4)
+	FinalizedBlockNumber = big.NewInt(-3)
+	LatestBlockNumber    = big.NewInt(-2)
+	PendingBlockNumber   = big.NewInt(-1)
+	EarliestBlockNumber  = big.NewInt(0)
+)
+
+type Head struct {
+	safe      atomic.Pointer[big.Int]
+	finalized atomic.Pointer[big.Int]
+	latest    atomic.Pointer[big.Int]
+	pending   atomic.Pointer[big.Int]
+}
+
+func (h *Head) Load(ctx context.Context, client *ethclient.Client) error {
+	safe, err := client.HeaderByNumber(ctx, SafeBlockNumber)
+	if err != nil {
+		return fmt.Errorf("couldn't get safe block: %w", err)
+	}
+
+	finalized, err := client.HeaderByNumber(ctx, FinalizedBlockNumber)
+	if err != nil {
+		return fmt.Errorf("couldn't get finalized block: %w", err)
+	}
+
+	latest, err := client.HeaderByNumber(ctx, LatestBlockNumber)
+	if err != nil {
+		return fmt.Errorf("couldn't get latest block: %w", err)
+	}
+
+	pending, err := client.HeaderByNumber(ctx, PendingBlockNumber)
+	if err != nil {
+		return fmt.Errorf("couldn't get pending block: %w", err)
+	}
+
+	h.safe.Store(safe.Number)
+	h.finalized.Store(finalized.Number)
+	h.latest.Store(latest.Number)
+	h.pending.Store(pending.Number)
+
+	return nil
+}
+
+func (h *Head) Safe() *big.Int {
+	return h.safe.Load()
+}
+
+func (h *Head) Finalized() *big.Int {
+	return h.finalized.Load()
+}
+
+func (h *Head) Latest() *big.Int {
+	return h.latest.Load()
+}
+
+func (h *Head) Pending() *big.Int {
+	return h.pending.Load()
+}
+
 type App struct {
 	Config     *Config
+	Head       *Head
 	DataClient *db.Conn
 	NodeClient *ethclient.Client
 }
 
-func (app *App) Init(ctx context.Context) error {
+func CreateApp(ctx context.Context) (*App, error) {
 	config, err := LoadConfig()
 	if err != nil {
-		return fmt.Errorf("Couldn't parse config: %v", err)
+		return nil, fmt.Errorf("Couldn't parse config: %w", err)
 	}
 
 	db_conn, err := db.NewDB(config.DataDir, uint64(config.RamLimit))
 	if err != nil {
-		return fmt.Errorf("Couldn't load db: %v", err)
+		return nil, fmt.Errorf("Couldn't load db: %w", err)
 	}
 
 	eth, err := ethclient.DialContext(ctx, config.NodeAddr)
 	if err != nil {
-		return fmt.Errorf("Couln't connect to node: %v", err)
+		return nil, fmt.Errorf("Couln't connect to node: %w", err)
 	}
 
-	app.Config = &config
-	app.DataClient = db_conn
-	app.NodeClient = eth
+	app := &App{
+		Config:     &config,
+		Head:       &Head{},
+		DataClient: db_conn,
+		NodeClient: eth,
+	}
 
-	return nil
+	if err := app.Head.Load(ctx, app.NodeClient); err != nil {
+		return nil, err
+	}
+
+	return app, nil
 }
 
 func (app *App) Close() {
@@ -56,10 +125,10 @@ func (app *App) Close() {
 	app.NodeClient.Close()
 }
 
-func InitLogger(app *App) {
+func initLogger(dev bool) {
 	var logger zerolog.Logger
 
-	if app.Config.isDev() {
+	if dev {
 		logger = zerolog.New(zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.RFC3339}).
 			Level(zerolog.DebugLevel).
 			With().Timestamp().Caller().Int("pid", os.Getpid()).
@@ -81,13 +150,13 @@ func main() {
 	// Prepare env
 	flag.Parse()
 
-	app := &App{}
-	if err := app.Init(context.Background()); err != nil {
+	app, err := CreateApp(context.Background())
+	if err != nil {
 		panic(err.Error())
 	}
 	defer app.Close()
 
-	InitLogger(app)
+	initLogger(app.Config.IsDev())
 
 	// Background crawler
 	go background(context.Background(), app)
@@ -112,7 +181,7 @@ func main() {
 	// RPC Server
 	e := echo.New()
 
-	e.Debug = app.Config.isDev()
+	e.Debug = app.Config.IsDev()
 	e.HidePort = true
 	e.HideBanner = true
 
@@ -202,18 +271,22 @@ type Filter struct {
 	Topics  []interface{} `json:"topics"`
 }
 
-func parseBlockNumber(str *string, latest uint64) (uint64, error) {
+func parseBlockNumber(str *string, head *Head) (uint64, error) {
 	if str == nil {
-		return latest, nil
+		return head.Latest().Uint64(), nil
 	}
 
 	switch *str {
 	case "earliest":
 		return 0, nil
-
-	// count approximately to the last block :)
-	case "", "latest", "safe", "finalized", "pending":
-		return latest, nil
+	case "", "latest":
+		return head.Latest().Uint64(), nil
+	case "safe":
+		return head.Safe().Uint64(), nil
+	case "finalized":
+		return head.Finalized().Uint64(), nil
+	case "pending":
+		return head.Pending().Uint64(), nil
 	}
 
 	// parse hex string
@@ -225,16 +298,16 @@ func parseBlockNumber(str *string, latest uint64) (uint64, error) {
 	return value.Uint64(), nil
 }
 
-func (raw *Filter) ToQuery(latest uint64) (*db.Query, error) {
+func (raw *Filter) ToQuery(head *Head) (*db.Query, error) {
 	q, err := db.Query{}, (error)(nil)
 
 	// Block numbers
-	q.FromBlock, err = parseBlockNumber(raw.FromBlock, latest)
+	q.FromBlock, err = parseBlockNumber(raw.FromBlock, head)
 	if err != nil {
 		return nil, fmt.Errorf("invalid record 'fromBlock'")
 	}
 
-	q.ToBlock, err = parseBlockNumber(raw.ToBlock, latest)
+	q.ToBlock, err = parseBlockNumber(raw.ToBlock, head)
 	if err != nil {
 		return nil, fmt.Errorf("invalid record 'toBlock'")
 	}
@@ -329,14 +402,7 @@ func handleHttp(c echo.Context, app *App) error {
 		return c.JSON(http.StatusBadRequest, CreateResponseError("too many arguments, want at most 1"))
 	}
 
-	// TODO: don't fetch the node every request
-	latestBlock, err := app.NodeClient.BlockNumber(ctx)
-	if err != nil {
-		log.Error().Err(err).Msg("Couldn't get latest block number")
-		return c.JSON(http.StatusInternalServerError, CreateResponseError("internal server error"))
-	}
-
-	query, err := filters[0].ToQuery(latestBlock)
+	query, err := filters[0].ToQuery(app.Head)
 	if err != nil {
 		log.Error().Err(err).Msg("Couldn't convert request to internal filter")
 		return c.JSON(http.StatusInternalServerError, CreateResponseError(err.Error()))

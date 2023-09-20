@@ -27,7 +27,7 @@ func LoadConfig() (Config, error) {
 	return config, err
 }
 
-func (c *Config) isDev() bool {
+func (c *Config) IsDev() bool {
 	return c.Env == "development"
 }
 

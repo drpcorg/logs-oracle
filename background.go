@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/rs/zerolog"
 
@@ -22,6 +23,32 @@ func background(ctx context.Context, app *App) {
 		if err != nil { // ignore errors because we can continue to serve requests
 			log.Error().Err(err).Msg("Failed sync with node")
 			continue
+		}
+	}
+
+	ch := make(chan *types.Header)
+
+	sub, err := app.NodeClient.SubscribeNewHead(ctx, ch)
+	if err != nil {
+		log.Error().Err(err).Msg("Failed subscribe to NewHead")
+	} else {
+		for {
+			select {
+			case err := <-sub.Err():
+				log.Error().Err(err).Msg("couldn't get new head")
+
+			case <-ch:
+				if err := app.Head.Load(ctx, app.NodeClient); err != nil {
+					log.Error().Err(err).Msg("couldn't load current head")
+				}
+
+				log.Debug().
+					Str("safe", app.Head.Safe().String()).
+					Str("finalized", app.Head.Finalized().String()).
+					Str("latest", app.Head.Latest().String()).
+					Str("pending", app.Head.Pending().String()).
+					Msg("new head")
+			}
 		}
 	}
 }
