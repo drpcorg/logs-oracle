@@ -1,7 +1,6 @@
 package db
 
 import (
-	"log"
 	"os"
 	"sync"
 	"unsafe"
@@ -48,7 +47,7 @@ func (q Query) DBQueryT() C.db_query_t {
 	}
 
 	if len(q.Topics) > len(internal.topics) {
-		log.Fatal("too many topics")
+		panic("too many topics")
 	}
 
 	for i := 0; i < len(internal.topics); i++ {

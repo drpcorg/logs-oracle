@@ -11,6 +11,7 @@ type Config struct {
 	Env         string `default:"production"`
 	BindPort    int    `default:"8000"`
 	MetricsPort int    `default:"8001"`
+	AccessLog   bool   `default:"true"`
 
 	DataDir  string   `required:"true"`
 	RamLimit Datasize `default:"0"`
@@ -24,6 +25,10 @@ func LoadConfig() (Config, error) {
 	var config Config
 	err := envconfig.Process("oracle", &config)
 	return config, err
+}
+
+func (c *Config) isDev() bool {
+	return c.Env == "development"
 }
 
 type Datasize uint64
