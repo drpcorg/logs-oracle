@@ -11,7 +11,7 @@ type Config struct {
 	Env         string `default:"production"`
 	BindPort    int    `default:"8000"`
 	MetricsPort int    `default:"8001"`
-	AccessLog   bool   `default:"true"`
+	AccessLog   bool   `default:"false"`
 
 	DataDir  string   `required:"true"`
 	RamLimit Datasize `default:"0"`

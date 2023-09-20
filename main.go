@@ -2,15 +2,18 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"math/big"
 	"net/http"
 	"os"
+	"os/signal"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/labstack/echo-contrib/echoprometheus"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/rs/zerolog"
@@ -89,6 +92,23 @@ func main() {
 	// Background crawler
 	go background(context.Background(), app)
 
+	// Metrics server
+	metrics := echo.New()
+	metrics.HidePort = true
+	metrics.HideBanner = true
+
+	metrics.GET("/metrics", echoprometheus.NewHandler())
+
+	go func() {
+		if err := metrics.Start(fmt.Sprintf(":%d", app.Config.MetricsPort)); err != nil {
+			if errors.Is(err, http.ErrServerClosed) {
+				log.Info().Msg("metrics server / shutdowned")
+			} else {
+				log.Error().Err(err).Msg("metrics server / failed")
+			}
+		}
+	}()
+
 	// RPC Server
 	e := echo.New()
 
@@ -98,6 +118,7 @@ func main() {
 
 	e.Use(middleware.Recover())
 	e.Use(middleware.Decompress())
+	e.Use(echoprometheus.NewMiddleware("oracle"))
 
 	if app.Config.AccessLog {
 		e.Use(middleware.RequestLoggerWithConfig(middleware.RequestLoggerConfig{
@@ -144,13 +165,33 @@ func main() {
 		return handleHttp(c, app)
 	})
 
-	if err := e.Start(fmt.Sprintf(":%d", app.Config.BindPort)); err != nil {
-		if err == http.ErrServerClosed {
-			log.Info().Msg("rpc server / shutdowned")
-		} else {
-			log.Error().Err(err).Msg("rpc server / failed")
+	go func() {
+		if err := e.Start(fmt.Sprintf(":%d", app.Config.BindPort)); err != nil {
+			if err == http.ErrServerClosed {
+				log.Info().Msg("rpc server / shutdowned")
+			} else {
+				log.Error().Err(err).Msg("rpc server / failed")
+			}
 		}
+	}()
+
+	// shutdown with timeout
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt)
+	<-quit
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := e.Shutdown(ctx); err != nil {
+		log.Error().Err(err).Msg("couldn't shutdown rpc server")
 	}
+
+	if err := metrics.Shutdown(ctx); err != nil {
+		log.Error().Err(err).Msg("couldn't shutdown metrics server")
+	}
+
+	log.Info().Msg("server stopped")
 }
 
 type Filter struct {
