@@ -3,22 +3,24 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"math/big"
 	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/rs/zerolog"
 
 	"drpc-logs-oracle/db"
 )
 
-func background(app *App) {
-	for ; ; time.Sleep(time.Minute) {
+func background(ctx context.Context, app *App) {
+	log := zerolog.Ctx(ctx)
+
+	for ; ; time.Sleep(time.Second * 5) {
 		err := sync_node(app)
 		if err != nil { // ignore errors because we can continue to serve requests
-			log.Printf("failed sync with node: %v\n", err)
+			log.Error().Err(err).Msg("Failed sync with node")
 			continue
 		}
 	}
