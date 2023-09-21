@@ -9,11 +9,11 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"time"
-	"sync/atomic"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/labstack/echo-contrib/echoprometheus"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
@@ -23,71 +23,10 @@ import (
 	"drpc-logs-oracle/db"
 )
 
-var (
-	SafeBlockNumber      = big.NewInt(-4)
-	FinalizedBlockNumber = big.NewInt(-3)
-	LatestBlockNumber    = big.NewInt(-2)
-	PendingBlockNumber   = big.NewInt(-1)
-	EarliestBlockNumber  = big.NewInt(0)
-)
-
-type Head struct {
-	safe      atomic.Pointer[big.Int]
-	finalized atomic.Pointer[big.Int]
-	latest    atomic.Pointer[big.Int]
-	pending   atomic.Pointer[big.Int]
-}
-
-func (h *Head) Load(ctx context.Context, client *ethclient.Client) error {
-	safe, err := client.HeaderByNumber(ctx, SafeBlockNumber)
-	if err != nil {
-		return fmt.Errorf("couldn't get safe block: %w", err)
-	}
-
-	finalized, err := client.HeaderByNumber(ctx, FinalizedBlockNumber)
-	if err != nil {
-		return fmt.Errorf("couldn't get finalized block: %w", err)
-	}
-
-	latest, err := client.HeaderByNumber(ctx, LatestBlockNumber)
-	if err != nil {
-		return fmt.Errorf("couldn't get latest block: %w", err)
-	}
-
-	pending, err := client.HeaderByNumber(ctx, PendingBlockNumber)
-	if err != nil {
-		return fmt.Errorf("couldn't get pending block: %w", err)
-	}
-
-	h.safe.Store(safe.Number)
-	h.finalized.Store(finalized.Number)
-	h.latest.Store(latest.Number)
-	h.pending.Store(pending.Number)
-
-	return nil
-}
-
-func (h *Head) Safe() *big.Int {
-	return h.safe.Load()
-}
-
-func (h *Head) Finalized() *big.Int {
-	return h.finalized.Load()
-}
-
-func (h *Head) Latest() *big.Int {
-	return h.latest.Load()
-}
-
-func (h *Head) Pending() *big.Int {
-	return h.pending.Load()
-}
-
 type App struct {
-	Config     *Config
-	Head       *Head
-	DataClient *db.Conn
-	NodeClient *ethclient.Client
+	Config *Config
+	Node   *Node
+	Db     *db.Conn
 }
 
 func CreateApp(ctx context.Context) (*App, error) {
@@ -101,28 +40,22 @@ func CreateApp(ctx context.Context) (*App, error) {
 		return nil, fmt.Errorf("Couldn't load db: %w", err)
 	}
 
-	eth, err := ethclient.DialContext(ctx, config.NodeAddr)
+	node, err := CreateNode(ctx, config.NodeAddr, config.NodeBatch)
 	if err != nil {
-		return nil, fmt.Errorf("Couln't connect to node: %w", err)
-	}
-
-	app := &App{
-		Config:     &config,
-		Head:       &Head{},
-		DataClient: db_conn,
-		NodeClient: eth,
-	}
-
-	if err := app.Head.Load(ctx, app.NodeClient); err != nil {
 		return nil, err
 	}
 
+	app := &App{
+		Config: &config,
+		Node:   node,
+		Db:     db_conn,
+	}
 	return app, nil
 }
 
 func (app *App) Close() {
-	app.DataClient.Close()
-	app.NodeClient.Close()
+	app.Db.Close()
+	app.Node.Close()
 }
 
 func initLogger(dev bool) {
@@ -147,10 +80,13 @@ func initLogger(dev bool) {
 }
 
 func main() {
+	wg := sync.WaitGroup{}
+	ctx, cancel := context.WithCancel(context.Background())
+
 	// Prepare env
 	flag.Parse()
 
-	app, err := CreateApp(context.Background())
+	app, err := CreateApp(ctx)
 	if err != nil {
 		panic(err.Error())
 	}
@@ -158,8 +94,53 @@ func main() {
 
 	initLogger(app.Config.IsDev())
 
-	// Background crawler
-	go background(context.Background(), app)
+	// Background
+	go app.Node.SubscribeNewHead(ctx, &wg)
+
+	go func() {
+		wg.Add(1)
+		defer wg.Done()
+
+		start, err := app.Db.GetLastBlock()
+		if err != nil {
+			log.Error().Err(err).Msg("get last indexed block")
+			return
+		}
+
+		errs := make(chan error)
+		logs := make(chan []types.Log, 64)
+		go app.Node.SubscribeBlocks(ctx, &wg, start, logs, errs)
+
+		for {
+			select {
+			case err := <-errs:
+				log.Error().Err(err).Msg("Failed sync with node")
+				continue
+
+			case data := <-logs:
+				dbLogs := make([]db.Log, len(data))
+
+				for i, log := range data {
+					dbLogs[i].BlockNumber = log.BlockNumber
+					dbLogs[i].Address = db.Address(log.Address.Bytes())
+
+					for j, topic := range log.Topics {
+						dbLogs[i].Topics[j] = db.Hash(topic.Bytes())
+					}
+				}
+
+				if err := app.Db.Insert(dbLogs); err != nil {
+					log.Error().Err(err).Msg("couldn't insert logs in db")
+					return
+				} else {
+					log.Debug().Int("count", len(dbLogs)).Msg("inserted new logs in db")
+				}
+
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
 
 	// Metrics server
 	metrics := echo.New()
@@ -169,9 +150,12 @@ func main() {
 	metrics.GET("/metrics", echoprometheus.NewHandler())
 
 	go func() {
+		wg.Add(1)
+		defer wg.Done()
+
 		if err := metrics.Start(fmt.Sprintf(":%d", app.Config.MetricsPort)); err != nil {
 			if errors.Is(err, http.ErrServerClosed) {
-				log.Info().Msg("metrics server / shutdowned")
+				log.Debug().Msg("metrics server / shutdowned")
 			} else {
 				log.Error().Err(err).Msg("metrics server / failed")
 			}
@@ -228,37 +212,46 @@ func main() {
 	}
 
 	e.GET("/status", func(c echo.Context) error {
-		return c.String(http.StatusOK, app.DataClient.Status())
+		return c.String(http.StatusOK, app.Db.Status())
 	})
 	e.POST("/rpc", func(c echo.Context) error {
 		return handleHttp(c, app)
 	})
 
 	go func() {
+		wg.Add(1)
+		defer wg.Done()
+
 		if err := e.Start(fmt.Sprintf(":%d", app.Config.BindPort)); err != nil {
 			if err == http.ErrServerClosed {
-				log.Info().Msg("rpc server / shutdowned")
+				log.Debug().Msg("rpc server / shutdowned")
 			} else {
 				log.Error().Err(err).Msg("rpc server / failed")
 			}
 		}
 	}()
 
-	// shutdown with timeout
+	// graceful shutdown
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, os.Interrupt)
 	<-quit
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	go func() {
+		time.Sleep(60*time.Second)
+		os.Exit(1) // force exit after timeout
+	}()
 
-	if err := e.Shutdown(ctx); err != nil {
+	cancel() // notifying everyone about the shutdown
+
+	if err := e.Shutdown(ctx); err != nil { // wait rpc server
 		log.Error().Err(err).Msg("couldn't shutdown rpc server")
 	}
 
-	if err := metrics.Shutdown(ctx); err != nil {
+	if err := metrics.Shutdown(ctx); err != nil { // wait metrics server
 		log.Error().Err(err).Msg("couldn't shutdown metrics server")
 	}
+
+	wg.Wait() // wait background workers
 
 	log.Info().Msg("server stopped")
 }
@@ -271,45 +264,45 @@ type Filter struct {
 	Topics  []interface{} `json:"topics"`
 }
 
-func parseBlockNumber(str *string, head *Head) (uint64, error) {
+func parseBlockNumber(str *string, node *Node) (uint64, error) {
 	if str == nil {
-		return head.Latest().Uint64(), nil
+		return node.LatestBlock().Uint64(), nil
 	}
 
 	switch *str {
 	case "earliest":
 		return 0, nil
 	case "", "latest":
-		return head.Latest().Uint64(), nil
+		return node.LatestBlock().Uint64(), nil
 	case "safe":
-		return head.Safe().Uint64(), nil
+		return node.SafeBlock().Uint64(), nil
 	case "finalized":
-		return head.Finalized().Uint64(), nil
+		return node.FinalizedBlock().Uint64(), nil
 	case "pending":
-		return head.Pending().Uint64(), nil
+		return node.PendingBlock().Uint64(), nil
 	}
 
 	// parse hex string
 	value, ok := new(big.Int).SetString(*str, 0)
 	if !ok {
-		return 0, fmt.Errorf("failed to parse the value")
+		return 0, fmt.Errorf("parse error")
 	}
 
 	return value.Uint64(), nil
 }
 
-func (raw *Filter) ToQuery(head *Head) (*db.Query, error) {
+func (raw *Filter) ToQuery(node *Node) (*db.Query, error) {
 	q, err := db.Query{}, (error)(nil)
 
 	// Block numbers
-	q.FromBlock, err = parseBlockNumber(raw.FromBlock, head)
+	q.FromBlock, err = parseBlockNumber(raw.FromBlock, node)
 	if err != nil {
-		return nil, fmt.Errorf("invalid record 'fromBlock'")
+		return nil, fmt.Errorf("parse error 'fromBlock'")
 	}
 
-	q.ToBlock, err = parseBlockNumber(raw.ToBlock, head)
+	q.ToBlock, err = parseBlockNumber(raw.ToBlock, node)
 	if err != nil {
-		return nil, fmt.Errorf("invalid record 'toBlock'")
+		return nil, fmt.Errorf("parse error 'toBlock'")
 	}
 
 	if q.FromBlock > q.ToBlock {
@@ -402,13 +395,13 @@ func handleHttp(c echo.Context, app *App) error {
 		return c.JSON(http.StatusBadRequest, CreateResponseError("too many arguments, want at most 1"))
 	}
 
-	query, err := filters[0].ToQuery(app.Head)
+	query, err := filters[0].ToQuery(app.Node)
 	if err != nil {
 		log.Error().Err(err).Msg("Couldn't convert request to internal filter")
 		return c.JSON(http.StatusInternalServerError, CreateResponseError(err.Error()))
 	}
 
-	result, err := app.DataClient.Query(query)
+	result, err := app.Db.Query(query)
 	if err != nil {
 		log.Error().Err(err).Msg("Couldn't query in db")
 		return c.JSON(http.StatusInternalServerError, CreateResponseError("internal server error"))

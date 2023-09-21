@@ -18,7 +18,6 @@ type Config struct {
 
 	NodeAddr       string `required:"true"` // ethereum json rpc endpoint url
 	NodeBatch      uint64 `default:"128"`   // count of block for one request to node
-	NodeConcurency uint64 `default:"8"`     // count of simultaneous requests to node
 }
 
 func LoadConfig() (Config, error) {
