@@ -1,4 +1,4 @@
-package db
+package liboracle
 
 import (
 	"encoding/hex"

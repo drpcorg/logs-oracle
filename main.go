@@ -20,13 +20,13 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
-	"drpc-logs-oracle/db"
+	"drpc-logs-oracle/liboracle"
 )
 
 type App struct {
 	Config *Config
 	Node   *Node
-	Db     *db.Conn
+	Db     *liboracle.Conn
 }
 
 func CreateApp(ctx context.Context) (*App, error) {
@@ -35,7 +35,7 @@ func CreateApp(ctx context.Context) (*App, error) {
 		return nil, fmt.Errorf("Couldn't parse config: %w", err)
 	}
 
-	db_conn, err := db.NewDB(config.DataDir, uint64(config.RamLimit))
+	db_conn, err := liboracle.NewDB(config.DataDir, uint64(config.RamLimit))
 	if err != nil {
 		return nil, fmt.Errorf("Couldn't load db: %w", err)
 	}
@@ -118,14 +118,14 @@ func main() {
 				continue
 
 			case data := <-logs:
-				dbLogs := make([]db.Log, len(data))
+				dbLogs := make([]liboracle.Log, len(data))
 
 				for i, log := range data {
 					dbLogs[i].BlockNumber = log.BlockNumber
-					dbLogs[i].Address = db.Address(log.Address.Bytes())
+					dbLogs[i].Address = liboracle.Address(log.Address.Bytes())
 
 					for j, topic := range log.Topics {
-						dbLogs[i].Topics[j] = db.Hash(topic.Bytes())
+						dbLogs[i].Topics[j] = liboracle.Hash(topic.Bytes())
 					}
 				}
 
@@ -291,8 +291,8 @@ func parseBlockNumber(str *string, node *Node) (uint64, error) {
 	return value.Uint64(), nil
 }
 
-func (raw *Filter) ToQuery(node *Node) (*db.Query, error) {
-	q, err := db.Query{}, (error)(nil)
+func (raw *Filter) ToQuery(node *Node) (*liboracle.Query, error) {
+	q, err := liboracle.Query{}, (error)(nil)
 
 	// Block numbers
 	q.FromBlock, err = parseBlockNumber(raw.FromBlock, node)
@@ -315,14 +315,14 @@ func (raw *Filter) ToQuery(node *Node) (*db.Query, error) {
 		case []interface{}:
 			for i, addr := range r {
 				if str, ok := addr.(string); ok {
-					q.Addresses = append(q.Addresses, db.Address(common.HexToAddress(str)))
+					q.Addresses = append(q.Addresses, liboracle.Address(common.HexToAddress(str)))
 				} else {
 					return nil, fmt.Errorf("non-string address at index %d", i)
 				}
 			}
 
 		case string:
-			q.Addresses = append(q.Addresses, db.Address(common.HexToAddress(r)))
+			q.Addresses = append(q.Addresses, liboracle.Address(common.HexToAddress(r)))
 
 		default:
 			return nil, fmt.Errorf("invalid addresses in query")
@@ -335,14 +335,14 @@ func (raw *Filter) ToQuery(node *Node) (*db.Query, error) {
 			return nil, fmt.Errorf("allowed only 4 topic filters")
 		}
 
-		q.Topics = make([][]db.Hash, len(raw.Topics))
+		q.Topics = make([][]liboracle.Hash, len(raw.Topics))
 
 		for i, t := range raw.Topics {
 			switch topic := t.(type) {
 			case nil:
 
 			case string:
-				q.Topics[i] = append(q.Topics[i], db.Hash(common.HexToHash(topic)))
+				q.Topics[i] = append(q.Topics[i], liboracle.Hash(common.HexToHash(topic)))
 
 			case []interface{}:
 				// or case e.g. [null, "topic0", "topic1"]
@@ -353,7 +353,7 @@ func (raw *Filter) ToQuery(node *Node) (*db.Query, error) {
 					}
 
 					if topic, ok := rawTopic.(string); ok {
-						q.Topics[i] = append(q.Topics[i], db.Hash(common.HexToHash(topic)))
+						q.Topics[i] = append(q.Topics[i], liboracle.Hash(common.HexToHash(topic)))
 					} else {
 						return nil, fmt.Errorf("invalid topic(s)")
 					}

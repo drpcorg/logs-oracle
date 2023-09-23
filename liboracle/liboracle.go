@@ -1,4 +1,4 @@
-package db
+package liboracle
 
 import (
 	"os"
@@ -7,7 +7,7 @@ import (
 )
 
 // #cgo CFLAGS: -std=gnu11 -Wall -Wextra -Wwrite-strings -Wfloat-equal -O3 -march=native
-// #include "db.h"
+// #include "liboracle.h"
 import "C"
 
 type Hash [32]byte    // see db_hash_t
