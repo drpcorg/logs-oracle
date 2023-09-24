@@ -1,6 +1,6 @@
 #include "utils.h"
 
-uint64_t murmur64A(const void* key, const int len, const uint32_t seed) {
+uint64_t murmur64A(const void* key, const uint64_t len, const uint32_t seed) {
   const uint64_t m = 0xc6a4a7935bd1e995;
   const int r = 47;
 
@@ -22,8 +22,6 @@ uint64_t murmur64A(const void* key, const int len, const uint32_t seed) {
 
   const uint8_t* data2 = (const uint8_t*)data;
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wimplicit-fallthrough"
   switch (len & 7) {
     case 7:
       h ^= (uint64_t)(data2[6]) << 48;
@@ -41,7 +39,6 @@ uint64_t murmur64A(const void* key, const int len, const uint32_t seed) {
       h ^= (uint64_t)(data2[0]);
       h *= m;
   };
-#pragma GCC diagnostic pop
 
   h ^= h >> r;
   h *= m;

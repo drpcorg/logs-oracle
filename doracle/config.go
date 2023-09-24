@@ -16,8 +16,8 @@ type Config struct {
 	DataDir  string   `required:"true"`
 	RamLimit Datasize `default:"0"`
 
-	NodeAddr       string `required:"true"` // ethereum json rpc endpoint url
-	NodeBatch      uint64 `default:"128"`   // count of block for one request to node
+	NodeAddr  string `required:"true"` // ethereum json rpc endpoint url
+	NodeBatch uint64 `default:"128"`   // count of block for one request to node
 }
 
 func LoadConfig() (Config, error) {

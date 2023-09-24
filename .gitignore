@@ -1,2 +1,6 @@
-# Bin
-drpc-logs-oracle
+*.o
+*.a
+*.so
+
+doracle/_data
+doracle/doracle

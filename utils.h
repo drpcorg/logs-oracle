@@ -25,7 +25,7 @@ typedef uint8_t bloom_t[LOGS_BLOOM_SIZE];
 
 // MurmurHash3 was written by Austin Appleby, and is placed in the public
 // domain. The author hereby disclaims copyright to this source code.
-uint64_t murmur64A(const void* key, const int len, const uint32_t seed);
+uint64_t murmur64A(const void* key, const uint64_t len, const uint32_t seed);
 
 void bloom_add(bloom_t* bloom, uint8_t* hash);
 bool bloom_check(bloom_t* bloom, uint8_t* hash);

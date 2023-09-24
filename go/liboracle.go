@@ -6,8 +6,9 @@ import (
 	"unsafe"
 )
 
-// #cgo CFLAGS: -std=gnu11 -Wall -Wextra -Wwrite-strings -Wfloat-equal -O3 -march=native
-// #include "liboracle.h"
+// #cgo CFLAGS: -std=c11 -Wall -Wextra -O3 -march=native
+// #cgo LDFLAGS: -L.. -loracle 
+// #include "../liboracle.h"
 import "C"
 
 type Hash [32]byte    // see db_hash_t

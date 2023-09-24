@@ -20,7 +20,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
-	"drpc-logs-oracle/liboracle"
+	"liboracle"
 )
 
 type App struct {
@@ -237,7 +237,7 @@ func main() {
 	<-quit
 
 	go func() {
-		time.Sleep(60*time.Second)
+		time.Sleep(60 * time.Second)
 		os.Exit(1) // force exit after timeout
 	}()
 

@@ -44,13 +44,13 @@ void db_query_free(db_query_t* query) {
   }
 }
 
-inline void _read_manifest(db_t* db) {
+void _read_manifest(db_t* db) {
   fseek(db->manifest, 0, SEEK_SET);
   fscanf(db->manifest, "%zd %zd %zd %zd", &db->current_block,
          &db->blocks_capacity, &db->logs_count, &db->logs_capacity);
 }
 
-inline void _write_manifest(db_t* db) {
+void _write_manifest(db_t* db) {
   fseek(db->manifest, 0, SEEK_SET);
   fprintf(db->manifest, "%zd %zd %zd %zd", db->current_block,
           db->blocks_capacity, db->logs_count, db->logs_capacity);
@@ -86,7 +86,7 @@ int _open_file(db_t* db, const char* filename, size_t init_size) {
   return fd;
 }
 
-void* _map_file(size_t fd) {
+void* _map_file(int fd) {
   return mmap(NULL, STORE_SIZE, PROT_READ | PROT_WRITE | MAP_HUGETLB,
               MAP_SHARED, fd, 0);
 }
@@ -164,7 +164,7 @@ db_t* db_new(char* dir, uint64_t ram_limit) {
   return db;
 }
 
-inline bool _db_check_block_by_query(db_block_t* block, db_query_t* query) {
+bool _db_check_block_by_query(db_block_t* block, db_query_t* query) {
   if (query->addresses.len > 0) {
     bool has = false;
 
@@ -198,11 +198,11 @@ inline bool _db_check_block_by_query(db_block_t* block, db_query_t* query) {
   return true;
 }
 
-inline size_t _db_block_query(db_t* db,
-                              db_block_t* block,
-                              db_query_t* query,
-                              db_cell_address_t* addresses,
-                              size_t* topics[TOPICS_LENGTH]) {
+size_t _db_block_query(db_t* db,
+                       db_block_t* block,
+                       db_query_t* query,
+                       db_cell_address_t* addresses,
+                       size_t* topics[TOPICS_LENGTH]) {
   uint64_t count = 0;
 
   for (size_t i = block->offset, end = i + block->logs_count; i < end; ++i) {
@@ -323,10 +323,10 @@ void db_insert(db_t* db, size_t size, db_log_t* logs) {
         return;
       }
 
-      // if (mlock(db->addresses, db->logs_capacity * sizeof(db_address_t)) ==
-      //     -1) {
-      //   return;
-      // }
+      if (mlock(db->addresses, db->logs_capacity * sizeof(db_address_t)) ==
+          -1) {
+        return;
+      }
     }
 
     db_block_t* current_block = &(db->blocks[db->current_block]);
