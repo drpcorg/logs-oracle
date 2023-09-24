@@ -1,6 +1,6 @@
 module doracle
 
-go 1.21.1
+go 1.21
 
 replace liboracle => ../go
 

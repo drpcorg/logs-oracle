@@ -1,6 +1,6 @@
 CC=clang
-CFLAGS=-std=c11 -Wall -Wextra -Wpedantic \
-       -Wvla -Wshadow -Wstrict-prototypes -Wwrite-strings -Wfloat-equal -Wconversion -Wdouble-promotion
+CFLAGS=-std=c17 -Wall -Wextra -Wpedantic -Wnull-dereference -Wvla -Wshadow \
+       -Wstrict-prototypes -Wwrite-strings -Wfloat-equal -Wconversion -Wdouble-promotion
 
 CFLAGS+=-D_XOPEN_SOURCE=700 -D_GNU_SOURCE
 
@@ -26,6 +26,10 @@ format:
 	go fmt ./...
 	clang-format -style=Chromium -i **/*.{c,h}
 
-.PHONY: doracle
+.PHONY: lint
+lint:
+	clang-tidy *.c -- $(CFLAGS)
+
+.PHONY: doracle-build
 doracle-build: liboracle.a
 	$(MAKE) -C doracle build

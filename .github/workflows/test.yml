@@ -27,5 +27,11 @@ jobs:
       - name: Install build deps
         run: sudo apt-get install libcriterion-dev
 
-      - name: liboracle unit tests
+      - name: test liboracle
         run: make test
+
+      - name: lint liboracle
+        run: make lint
+
+      - name: build doracle
+        run: make doracle-build

@@ -6,7 +6,7 @@ import (
 	"unsafe"
 )
 
-// #cgo CFLAGS: -std=c11 -Wall -Wextra -O3 -march=native
+// #cgo CFLAGS: -std=c17 -Wall -Wextra -O3 -march=native
 // #cgo LDFLAGS: -L.. -loracle 
 // #include "../liboracle.h"
 import "C"
