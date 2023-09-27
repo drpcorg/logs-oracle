@@ -7,20 +7,6 @@
 
 #define LOGS_BLOOM_SIZE 256
 
-#define min(a, b)           \
-  ({                        \
-    __typeof__(a) _a = (a); \
-    __typeof__(b) _b = (b); \
-    _a < _b ? _a : _b;      \
-  })
-
-#define max(a, b)           \
-  ({                        \
-    __typeof__(a) _a = (a); \
-    __typeof__(b) _b = (b); \
-    _a > _b ? _a : _b;      \
-  })
-
 typedef uint8_t bloom_t[LOGS_BLOOM_SIZE];
 
 // MurmurHash3 was written by Austin Appleby, and is placed in the public

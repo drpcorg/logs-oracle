@@ -20,7 +20,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
-	"liboracle"
+	liboracle "github.com/p2p-org/drpc-logs-oracle"
 )
 
 type App struct {

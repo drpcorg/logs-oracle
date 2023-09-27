@@ -1,6 +1,8 @@
 *.o
+*.d
 *.a
 *.so
 
+libtest
 doracle/_data
 doracle/doracle

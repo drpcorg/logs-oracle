@@ -2,15 +2,15 @@ module doracle
 
 go 1.21
 
-replace liboracle => ../go
+replace github.com/p2p-org/drpc-logs-oracle => ../
 
 require (
 	github.com/ethereum/go-ethereum v1.12.1
 	github.com/kelseyhightower/envconfig v1.4.0
 	github.com/labstack/echo-contrib v0.15.0
 	github.com/labstack/echo/v4 v4.11.1
+	github.com/p2p-org/drpc-logs-oracle v0.0.0-00010101000000-000000000000
 	github.com/rs/zerolog v1.30.0
-	liboracle v0.0.0-00010101000000-000000000000
 )
 
 require (

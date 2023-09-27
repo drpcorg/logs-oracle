@@ -12,26 +12,41 @@ permissions:
 
 jobs:
   tests:
-    name: "Tests: ubuntu-latest"
-    runs-on: ubuntu-latest
+    name: "Tests: ${{ matrix.os }} / ${{ matrix.compiler.CC }}"
+    runs-on: "${{ matrix.os }}"
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ "ubuntu-latest", "macos-latest" ]
+        compiler:
+          - { compiler: GNU,  CC: gcc }
+          - { compiler: LLVM, CC: clang }
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Install GO toolchain
+      - name: Install Go toolchain
         uses: actions/setup-go@v4
         with:
           go-version: '1.20'
           check-latest: true
 
-      - name: Install build deps
-        run: sudo apt-get install libcriterion-dev
+      - name: Install dependencies for Linux
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get install gcc-12 clang-15 libcriterion-dev
 
-      - name: test liboracle
-        run: make test
+      - name: Install dependencies for Mac
+        if: matrix.os == 'macos-latest'
+        run: brew install gcc@12 llvm@15 criterion
 
-      - name: lint liboracle
+      - name: Test liboracle
+        run: make libtest
+        env: { CC: "${{ matrix.compiler.CC }}" }
+
+      - name: Lint liboracle
         run: make lint
+        env: { CC: "${{ matrix.compiler.CC }}" }
 
-      - name: build doracle
+      - name: Build doracle
         run: make doracle-build
+        env: { CC: "${{ matrix.compiler.CC }}" }

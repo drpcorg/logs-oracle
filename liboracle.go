@@ -2,33 +2,36 @@ package liboracle
 
 import (
 	"os"
-	"sync"
 	"unsafe"
 )
 
-// #cgo CFLAGS: -std=c17 -Wall -Wextra -O3 -march=native
-// #cgo LDFLAGS: -L.. -loracle 
-// #include "../liboracle.h"
+// /* WARN: CFLAGS duplicated in Makefile */
+// #cgo CFLAGS: -std=c17 -pthread -pedantic -march=native -O3 -ffast-math -fPIC -fvisibility=hidden
+// #cgo CFLAGS: -Wall -Wextra -Wpedantic -Wnull-dereference -Wvla -Wshadow
+// #cgo CFLAGS: -Wstrict-prototypes -Wwrite-strings -Wfloat-equal -Wconversion -Wdouble-promotion
+// #cgo CFLAGS: -D_XOPEN_SOURCE=700 -D_GNU_SOURCE
+//
+// #include "liboracle.h"
 import "C"
 
-type Hash [32]byte    // see db_hash_t
-type Address [20]byte // see db_address_t
+type Hash [32]byte    // see rcl_hash_t
+type Address [20]byte // see rcl_address_t
 
-type Log struct { // see db_log_t
+type Log struct { // see rcl_log_t
 	BlockNumber uint64
 	Address     Address
 	Topics      [4]Hash
 }
 
-type Query struct { // see db_query_t
+type Query struct { // see rcl_query_t
 	FromBlock uint64
 	ToBlock   uint64
 	Addresses []Address
 	Topics    [][]Hash
 }
 
-func (q Query) DBQueryT() C.db_query_t {
-	internal := C.db_query_t{}
+func (q Query) DBQueryT() C.rcl_query_t {
+	internal := C.rcl_query_t{}
 
 	internal.from_block = C.uint64_t(q.FromBlock)
 	internal.to_block = C.uint64_t(q.ToBlock)
@@ -37,8 +40,8 @@ func (q Query) DBQueryT() C.db_query_t {
 	internal.addresses.data = nil
 
 	if len(q.Addresses) > 0 {
-		bytes := C.size_t(len(q.Addresses)) * C.sizeof_db_address_t
-		internal.addresses.data = (*C.db_address_t)(C.malloc(bytes))
+		bytes := C.size_t(len(q.Addresses)) * C.sizeof_rcl_address_t
+		internal.addresses.data = (*C.rcl_address_t)(C.malloc(bytes))
 
 		C.memcpy(
 			unsafe.Pointer(internal.addresses.data),
@@ -58,8 +61,8 @@ func (q Query) DBQueryT() C.db_query_t {
 		if len(q.Topics) > i && len(q.Topics[i]) > 0 {
 			internal.topics[i].len = C.size_t(len(q.Topics[i]))
 
-			bytes := C.size_t(len(q.Topics[i])) * C.sizeof_db_hash_t
-			internal.topics[i].data = (*C.db_hash_t)(C.malloc(bytes))
+			bytes := C.size_t(len(q.Topics[i])) * C.sizeof_rcl_hash_t
+			internal.topics[i].data = (*C.rcl_hash_t)(C.malloc(bytes))
 
 			C.memcpy(
 				unsafe.Pointer(internal.topics[i].data),
@@ -73,8 +76,7 @@ func (q Query) DBQueryT() C.db_query_t {
 }
 
 type Conn struct {
-	mu sync.RWMutex
-	db *C.db_t
+	db *C.rcl_t
 }
 
 func NewDB(data_dir string, ram_limit uint64) (*Conn, error) {
@@ -86,22 +88,16 @@ func NewDB(data_dir string, ram_limit uint64) (*Conn, error) {
 		return nil, err
 	}
 
-	db, err := C.db_new(data_dir_cstr, C.uint64_t(ram_limit))
+	db, err := C.rcl_new(data_dir_cstr, C.uint64_t(ram_limit))
 	return &Conn{db: db}, err
 }
 
 func (conn *Conn) Close() {
-	conn.mu.Lock()
-	defer conn.mu.Unlock()
-
-	C.db_free(conn.db)
+	C.rcl_free(conn.db)
 }
 
 func (conn *Conn) Query(query *Query) (uint64, error) {
-	conn.mu.RLock()
-	defer conn.mu.RUnlock()
-
-	count, err := C.db_query(conn.db, query.DBQueryT())
+	count, err := C.rcl_query(conn.db, query.DBQueryT())
 	return uint64(count), err
 }
 
@@ -110,36 +106,27 @@ func (conn *Conn) Insert(logs []Log) error {
 		return nil
 	}
 
-	conn.mu.Lock()
-	defer conn.mu.Unlock()
-
-	_, err := C.db_insert(
+	_, err := C.rcl_insert(
 		conn.db,
 		C.size_t(len(logs)),
-		(*C.db_log_t)(unsafe.Pointer(&(logs[0]))),
+		(*C.rcl_log_t)(unsafe.Pointer(&(logs[0]))),
 	)
 
 	return err
 }
 
 func (conn *Conn) GetLastBlock() (uint64, error) {
-	conn.mu.RLock()
-	defer conn.mu.RUnlock()
-
-	last, err := C.db_current_block(conn.db)
+	last, err := C.rcl_current_block(conn.db)
 	return uint64(last), err
 }
 
 func (conn *Conn) Status() string {
-	conn.mu.RLock()
-	defer conn.mu.RUnlock()
-
 	size := 1024 // 1KB
 
 	buffer := (*C.char)(C.calloc(C.size_t(size), C.sizeof_char))
 	defer C.free(unsafe.Pointer(buffer))
 
-	C.db_status(conn.db, buffer, C.size_t(size))
+	C.rcl_status(conn.db, buffer, C.size_t(size))
 
 	return C.GoString(buffer)
 }
