@@ -49,7 +49,7 @@ clean:
 
 .PHONY: format
 format:
-	cd go && go fmt ./...
+	go fmt ./...
 	cd doracle && go fmt ./...
 	clang-format -style=Chromium -i *.{c,h}
 
@@ -58,5 +58,5 @@ lint:
 	clang-tidy *.c -- $(CFLAGS)
 
 .PHONY: doracle-build
-doracle-build: liboracle.a
+doracle-build:
 	$(MAKE) -C doracle build
