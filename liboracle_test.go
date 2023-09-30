@@ -114,8 +114,7 @@ func TestNew(t *testing.T) {
 	defer conn.Close()
 
 	// get last block on empty DB
-	count, err := conn.GetLastBlock()
-	require.NoError(t, err, "GetLastBlock")
+	count := conn.GetBlocksCount()
 	require.Equal(t, count, uint64(0))
 }
 
@@ -128,8 +127,7 @@ func TestEmptyInsert(t *testing.T) {
 	err := conn.Insert([]Log{})
 	require.NoError(t, err, "GetLastBlock")
 
-	count, err := conn.GetLastBlock()
-	require.NoError(t, err, "GetLastBlock")
+	count := conn.GetBlocksCount()
 	require.Equal(t, count, uint64(0))
 }
 
@@ -140,9 +138,8 @@ func TestQuery(t *testing.T) {
 	err := conn.Insert(suite)
 	require.NoError(t, err, "Insert")
 
-	last, err := conn.GetLastBlock()
-	require.NoError(t, err, "GetLastBLock")
-	require.Equal(t, last, uint64(6))
+	last := conn.GetBlocksCount()
+	require.Equal(t, last, uint64(7))
 
 	query := func(result uint64, q Query) {
 		count, err := conn.Query(&q)

@@ -3,6 +3,11 @@
 *.a
 *.so
 
+**/.env
+
 libtest
+*.test
 doracle/_data
 doracle/doracle
+
+.gdb_history

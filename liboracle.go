@@ -1,16 +1,14 @@
 package liboracle
 
 import (
+	"fmt"
 	"os"
+	"runtime"
+	"sync"
 	"unsafe"
 )
 
-// /* WARN: CFLAGS duplicated in Makefile */
-// #cgo CFLAGS: -std=c17 -pthread -pedantic -march=native -O3 -ffast-math -fPIC -fvisibility=hidden
-// #cgo CFLAGS: -Wall -Wextra -Wpedantic -Wnull-dereference -Wvla -Wshadow
-// #cgo CFLAGS: -Wstrict-prototypes -Wwrite-strings -Wfloat-equal -Wconversion -Wdouble-promotion
-// #cgo CFLAGS: -D_XOPEN_SOURCE=700 -D_GNU_SOURCE
-//
+// #cgo CFLAGS: -std=c11 -pthread -Wall -Wextra -Wpedantic
 // #include "liboracle.h"
 import "C"
 
@@ -30,49 +28,10 @@ type Query struct { // see rcl_query_t
 	Topics    [][]Hash
 }
 
-func (q Query) DBQueryT() C.rcl_query_t {
-	internal := C.rcl_query_t{}
-
-	internal.from_block = C.uint64_t(q.FromBlock)
-	internal.to_block = C.uint64_t(q.ToBlock)
-
-	internal.addresses.len = C.size_t(len(q.Addresses))
-	internal.addresses.data = nil
-
-	if len(q.Addresses) > 0 {
-		bytes := C.size_t(len(q.Addresses)) * C.sizeof_rcl_address_t
-		internal.addresses.data = (*C.rcl_address_t)(C.malloc(bytes))
-
-		C.memcpy(
-			unsafe.Pointer(internal.addresses.data),
-			unsafe.Pointer(&(q.Addresses[0])),
-			bytes,
-		)
-	}
-
-	if len(q.Topics) > len(internal.topics) {
-		panic("too many topics")
-	}
-
-	for i := 0; i < len(internal.topics); i++ {
-		internal.topics[i].len = 0
-		internal.topics[i].data = nil
-
-		if len(q.Topics) > i && len(q.Topics[i]) > 0 {
-			internal.topics[i].len = C.size_t(len(q.Topics[i]))
-
-			bytes := C.size_t(len(q.Topics[i])) * C.sizeof_rcl_hash_t
-			internal.topics[i].data = (*C.rcl_hash_t)(C.malloc(bytes))
-
-			C.memcpy(
-				unsafe.Pointer(internal.topics[i].data),
-				unsafe.Pointer(&(q.Topics[i][0])),
-				bytes,
-			)
-		}
-	}
-
-	return internal
+var queriesPool = sync.Pool{
+	New: func() any {
+		return new(C.rcl_query_t)
+	},
 }
 
 type Conn struct {
@@ -97,7 +56,46 @@ func (conn *Conn) Close() {
 }
 
 func (conn *Conn) Query(query *Query) (uint64, error) {
-	count, err := C.rcl_query(conn.db, query.DBQueryT())
+	var pinner runtime.Pinner
+
+	cquery := queriesPool.Get().(*C.rcl_query_t)
+	pinner.Pin(cquery)
+
+	cquery.from_block = C.uint64_t(query.FromBlock)
+	cquery.to_block = C.uint64_t(query.ToBlock)
+
+	cquery.addresses.len = C.size_t(len(query.Addresses))
+	cquery.addresses.data = nil
+
+	if len(query.Addresses) > 0 {
+		ptr := &(query.Addresses[0])
+		pinner.Pin(ptr)
+
+		cquery.addresses.data = (*C.rcl_address_t)(unsafe.Pointer(ptr))
+	}
+
+	if len(query.Topics) > len(cquery.topics) {
+		panic("too many topics")
+	}
+
+	for i := 0; i < len(cquery.topics); i++ {
+		cquery.topics[i].len = 0
+		cquery.topics[i].data = nil
+
+		if len(query.Topics) > i && len(query.Topics[i]) > 0 {
+			ptr := &(query.Topics[i][0])
+			pinner.Pin(ptr)
+
+			cquery.topics[i].len = C.size_t(len(query.Topics[i]))
+			cquery.topics[i].data = (*C.rcl_hash_t)(unsafe.Pointer(ptr))
+		}
+	}
+
+	count, err := C.rcl_query(conn.db, (*C.rcl_query_t)(unsafe.Pointer(cquery)))
+
+	pinner.Unpin()
+	queriesPool.Put(cquery)
+
 	return uint64(count), err
 }
 
@@ -106,27 +104,23 @@ func (conn *Conn) Insert(logs []Log) error {
 		return nil
 	}
 
-	_, err := C.rcl_insert(
+	err := C.rcl_insert(
 		conn.db,
 		C.size_t(len(logs)),
 		(*C.rcl_log_t)(unsafe.Pointer(&(logs[0]))),
 	)
 
-	return err
+	if err != 0 {
+		return fmt.Errorf("couldn't insert logs, code: %d", int(err))
+	}
+
+	return nil
 }
 
-func (conn *Conn) GetLastBlock() (uint64, error) {
-	last, err := C.rcl_current_block(conn.db)
-	return uint64(last), err
+func (conn *Conn) GetLogsCount() uint64 {
+	return uint64(C.rcl_logs_count(conn.db))
 }
 
-func (conn *Conn) Status() string {
-	size := 1024 // 1KB
-
-	buffer := (*C.char)(C.calloc(C.size_t(size), C.sizeof_char))
-	defer C.free(unsafe.Pointer(buffer))
-
-	C.rcl_status(conn.db, buffer, C.size_t(size))
-
-	return C.GoString(buffer)
+func (conn *Conn) GetBlocksCount() uint64 {
+	return uint64(C.rcl_blocks_count(conn.db))
 }

@@ -101,11 +101,7 @@ func main() {
 		wg.Add(1)
 		defer wg.Done()
 
-		start, err := app.Db.GetLastBlock()
-		if err != nil {
-			log.Error().Err(err).Msg("get last indexed block")
-			return
-		}
+		start := app.Db.GetBlocksCount()
 
 		errs := make(chan error)
 		logs := make(chan []types.Log, 64)
@@ -212,7 +208,11 @@ func main() {
 	}
 
 	e.GET("/status", func(c echo.Context) error {
-		return c.String(http.StatusOK, app.Db.Status())
+		return c.String(http.StatusOK, fmt.Sprintf(
+			"blocks_count: %lu\nlogs_count:  %lu\n",
+			app.Db.GetBlocksCount(),
+			app.Db.GetLogsCount(),
+		))
 	})
 	e.POST("/rpc", func(c echo.Context) error {
 		return handleHttp(c, app)

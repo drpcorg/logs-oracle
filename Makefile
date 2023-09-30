@@ -1,9 +1,7 @@
 # WARN: duplicated in liboracle.go
-CFLAGS=-std=c17 -pthread -pedantic -march=native -ffast-math -fPIC -fvisibility=hidden \
+CFLAGS=-std=c11 -pthread -march=native -ffast-math -fPIC -fvisibility=hidden \
        -Wall -Wextra -Wpedantic -Wnull-dereference -Wvla -Wshadow \
        -Wstrict-prototypes -Wwrite-strings -Wfloat-equal -Wconversion -Wdouble-promotion
-
-CFLAGS+=-D_XOPEN_SOURCE=700 -D_GNU_SOURCE
 
 # Find sources
 ALL=$(wildcard *.c *.h)
@@ -34,14 +32,24 @@ liboracle.so: CFLAGS+=-O3 -flto
 liboracle.so: $(OBJ)
 	$(CC) $(CFLAGS) -O3 -shared -static-libgcc -o $@ $<
 
-.PHONY: test
-libtest: CFLAGS+=-O0 -g3 -fsanitize=address,undefined
+.PHONY: libtest
+libtest: CFLAGS+=-O0 -g3 -lc -fsanitize=address,undefined
 ifneq '' '$(findstring clang,$(shell $(CC) --version))'
 libtest: CFLAGS+=-fsanitize-trap
 endif
 libtest: $(OBJ) $(TESTS)
 	$(CC) $(CFLAGS) $(shell pkg-config --cflags --libs criterion) -o $@ $^
 	./$@
+
+.PHONY: libtest.go
+libtest.go: export CGO_CFLAGS=-fsanitize=address,undefined -O0 -g
+libtest.go: export CGO_LDFLAGS=-fsanitize=address,undefined 
+libtest.go:
+	go test -gcflags="all=-N -l" -c .
+	./drpc-logs-oracle.test -test.v
+
+.PHONY: test
+test: libtest libtest.go
 
 .PHONY: clean
 clean:
@@ -51,7 +59,7 @@ clean:
 format:
 	go fmt ./...
 	cd doracle && go fmt ./...
-	clang-format -style=Chromium -i *.{c,h}
+	clang-format -style=Chromium -i *.{c,h} 
 
 .PHONY: lint
 lint:
@@ -60,3 +68,7 @@ lint:
 .PHONY: doracle-build
 doracle-build:
 	$(MAKE) -C doracle build
+
+.PHONY: doracle-dev
+doracle-dev: liboracle.so
+	$(MAKE) -C doracle dev

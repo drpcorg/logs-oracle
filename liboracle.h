@@ -5,8 +5,8 @@
 
 enum { HASH_LENGTH = 32, ADDRESS_LENGTH = 20, TOPICS_LENGTH = 4 };
 
-typedef uint8_t rcl_hash_t[HASH_LENGTH];
-typedef uint8_t rcl_address_t[ADDRESS_LENGTH];
+typedef uint8_t rcl_hash_t[HASH_LENGTH];        // __attribute__((aligned(8)));
+typedef uint8_t rcl_address_t[ADDRESS_LENGTH];  // __attribute__((aligned(8)));
 
 typedef struct {
   uint64_t block_number;
@@ -33,11 +33,11 @@ typedef struct db rcl_t;
 
 rcl_export rcl_t* rcl_new(char* dir, uint64_t ram_limit);
 rcl_export void rcl_free(rcl_t* db);
-rcl_export void rcl_status(rcl_t* db, char* buffer, size_t len);
 
-rcl_export uint64_t rcl_query(rcl_t* db, rcl_query_t query);
+rcl_export uint64_t rcl_query(rcl_t* db, rcl_query_t* query);
 rcl_export int rcl_insert(rcl_t* db, size_t size, rcl_log_t* logs);
 
-rcl_export uint64_t rcl_current_block(rcl_t* db);
+uint64_t rcl_logs_count(rcl_t* db);
+uint64_t rcl_blocks_count(rcl_t* db);
 
 #endif  // _DB_H
