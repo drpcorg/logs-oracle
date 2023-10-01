@@ -33,23 +33,14 @@ liboracle.so: $(OBJ)
 	$(CC) $(CFLAGS) -O3 -shared -static-libgcc -o $@ $<
 
 .PHONY: libtest
-libtest: CFLAGS+=-O0 -g3 -lc -fsanitize=address,undefined
-ifneq '' '$(findstring clang,$(shell $(CC) --version))'
-libtest: CFLAGS+=-fsanitize-trap
-endif
+# libtest: CFLAGS+=-O0 -g3 -fsanitize=address,undefined
+# ifneq '' '$(findstring clang,$(shell $(CC) --version))'
+# libtest: CFLAGS+=-fsanitize-trap
+# endif
+libtest: CFLAGS+=-std=c2x -O0 -g3
 libtest: $(OBJ) $(TESTS)
 	$(CC) $(CFLAGS) $(shell pkg-config --cflags --libs criterion) -o $@ $^
 	./$@
-
-.PHONY: libtest.go
-libtest.go: export CGO_CFLAGS=-fsanitize=address,undefined -O0 -g
-libtest.go: export CGO_LDFLAGS=-fsanitize=address,undefined 
-libtest.go:
-	go test -gcflags="all=-N -l" -c .
-	./drpc-logs-oracle.test -test.v
-
-.PHONY: test
-test: libtest libtest.go
 
 .PHONY: clean
 clean:

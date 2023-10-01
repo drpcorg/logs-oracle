@@ -81,9 +81,9 @@ int rcl_page_init(rcl_page_t* page, const char* dirname, uint64_t index) {
   }
 
   int ra = file_open(&(page->addresses), addresses_file,
-                         LOGS_PAGE_CAPACITY * sizeof(rcl_cell_address_t));
+                     LOGS_PAGE_CAPACITY * sizeof(rcl_cell_address_t));
   int rt = file_open(&(page->topics), topics_file,
-                         LOGS_PAGE_CAPACITY * sizeof(rcl_cell_topics_t));
+                     LOGS_PAGE_CAPACITY * sizeof(rcl_cell_topics_t));
   if (ra != 0 || rt != 0)
     return -1;
 
@@ -169,7 +169,7 @@ rcl_t* rcl_new(char* dir, uint64_t ram_limit) {
       }
 
       status = file_open(vector_add(&(db->blocks_pages)), filename,
-                             BLOCKS_PAGE_CAPACITY * sizeof(rcl_block_t));
+                         BLOCKS_PAGE_CAPACITY * sizeof(rcl_block_t));
       if (rcl_unlikely(status != 0)) {
         return NULL;
       }
@@ -224,8 +224,8 @@ static int rcl_add_block(rcl_t* db, uint64_t block_number) {
         return -2;
       }
 
-      status = file_open(file, filename,
-                             BLOCKS_PAGE_CAPACITY * sizeof(rcl_block_t));
+      status =
+          file_open(file, filename, BLOCKS_PAGE_CAPACITY * sizeof(rcl_block_t));
       if (rcl_unlikely(status != 0)) {
         return -3;
       }

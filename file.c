@@ -1,8 +1,6 @@
 #include "file.h"
 
-int file_open(file_t* f,
-                         const char* filename,
-                         uint64_t init_size) {
+int file_open(file_t* f, const char* filename, uint64_t init_size) {
   int exists = access(filename, F_OK) == 0;
   errno = 0;
 

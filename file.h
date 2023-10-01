@@ -20,5 +20,4 @@ int file_unlock(file_t* f);
 int file_resize(file_t* f, size_t size);
 */
 
-
 #endif  // _RCL_FILE_H
