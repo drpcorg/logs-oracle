@@ -7,9 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// ----------------------
 // Section 0: utilities
-// ----------------------
 
 func HexToBytes(str string) []byte {
 	if len(str) >= 2 &&
@@ -48,9 +46,7 @@ func makeDB(t *testing.T) *Conn {
 	return conn
 }
 
-// ----------------------------
 // Section 1: test data suite
-// ----------------------------
 
 var addresses = [...]Address{
 	HexToAddress("0xe4e50b96f70aab13a2d7e654d07d7d4173319653"),
@@ -105,9 +101,7 @@ var suite = []Log{
 	Log{BlockNumber: 6, Address: addresses[4], Topics: [4]Hash{topics[9], topics[8], Hash{}, Hash{}}},
 }
 
-// ----------------------
 // Section 2: Tests
-// ----------------------
 
 func TestNew(t *testing.T) {
 	conn := makeDB(t)

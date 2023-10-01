@@ -1,7 +1,10 @@
-#ifndef _DB_H
-#define _DB_H
+#ifndef _RCL_H
+#define _RCL_H
 
+#include "bloom.h"
 #include "common.h"
+#include "file.h"
+#include "vector.h"
 
 enum { HASH_LENGTH = 32, ADDRESS_LENGTH = 20, TOPICS_LENGTH = 4 };
 
@@ -40,4 +43,4 @@ rcl_export int rcl_insert(rcl_t* db, size_t size, rcl_log_t* logs);
 uint64_t rcl_logs_count(rcl_t* db);
 uint64_t rcl_blocks_count(rcl_t* db);
 
-#endif  // _DB_H
+#endif  // _RCL_H
