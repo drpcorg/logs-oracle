@@ -30,7 +30,7 @@ liboracle.a: $(OBJ)
 
 liboracle.so: CFLAGS+=-O3 -flto
 liboracle.so: $(OBJ)
-	$(CC) $(CFLAGS) -O3 -shared -static-libgcc -o $@ $<
+	$(CC) $(CFLAGS) -O3 -shared -static-libgcc -o $@ $^
 
 .PHONY: libtest
 # libtest: CFLAGS+=-O0 -g3 -fsanitize=address,undefined
@@ -44,17 +44,17 @@ libtest: $(OBJ) $(TESTS)
 
 .PHONY: clean
 clean:
-	rm -rf *.o *.d *.a *.so doracle/doracle libtest
+	rm -rf *.class *.jar *.o *.d *.a *.so doracle/doracle libtest
 
 .PHONY: format
 format:
 	go fmt ./...
-	cd doracle && go fmt ./...
-	clang-format -style=Chromium -i *.{c,h} 
+	clang-format -style=Chromium -i $$(find -type f -regex '.*\.\(h\|c\|java\)')
 
 .PHONY: lint
 lint:
 	clang-tidy *.c -- $(CFLAGS)
+
 
 .PHONY: doracle-build
 doracle-build:
@@ -62,4 +62,23 @@ doracle-build:
 
 .PHONY: doracle-dev
 doracle-dev: liboracle.so
-	$(MAKE) -C doracle dev
+	$(MAKE) -C doracle run-dev
+
+# TODO: use gradle for build java lib
+# Java binding
+JAVA_SRC=$(wildcard java/org/drpc/logsoracle/*.java)
+JAVA_CLASS=$(patsubst %.java,%.class,$(JAVA_SRC))
+
+.PHONY: jextract
+jextract:
+	jextract -t org.drpc.logsoracle @java/jextract-includes.txt --source --output java ./liboracle.h
+
+java/LogsOracle.jar: $(JAVA_SRC) liboracle.so
+	javac --source=20 --enable-preview $(JAVA_SRC:%='%')
+	cd java && \
+		jar cf $(@:java/%=%) $(JAVA_CLASS:java/%='%')
+	# jar uf $@ liboracle.so
+
+.PHONY: java-example
+java-example: java/LogsOracle.jar
+	java --source=20 --enable-preview -cp ".:$^" java/Example.java
