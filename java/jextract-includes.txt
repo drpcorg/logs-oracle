@@ -1,0 +1,20 @@
+#### Extracted from: ../liboracle.h
+
+--include-constant ADDRESS_LENGTH   # header: liboracle.h
+--include-constant HASH_LENGTH      # header: liboracle.h
+--include-constant TOPICS_LENGTH    # header: liboracle.h
+
+--include-struct db                 # header: liboracle.h
+
+--include-typedef rcl_t             # header: liboracle.h
+--include-typedef rcl_address_t     # header: liboracle.h
+--include-typedef rcl_hash_t        # header: liboracle.h
+--include-typedef rcl_log_t         # header: liboracle.h
+--include-typedef rcl_query_t       # header: liboracle.h
+
+--include-function rcl_blocks_count # header: liboracle.h
+--include-function rcl_free         # header: liboracle.h
+--include-function rcl_insert       # header: liboracle.h
+--include-function rcl_logs_count   # header: liboracle.h
+--include-function rcl_new          # header: liboracle.h
+--include-function rcl_query        # header: liboracle.h

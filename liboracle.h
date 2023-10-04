@@ -40,7 +40,7 @@ rcl_export void rcl_free(rcl_t* db);
 rcl_export uint64_t rcl_query(rcl_t* db, rcl_query_t* query);
 rcl_export int rcl_insert(rcl_t* db, size_t size, rcl_log_t* logs);
 
-uint64_t rcl_logs_count(rcl_t* db);
-uint64_t rcl_blocks_count(rcl_t* db);
+rcl_export uint64_t rcl_logs_count(rcl_t* db);
+rcl_export uint64_t rcl_blocks_count(rcl_t* db);
 
 #endif  // _RCL_H
