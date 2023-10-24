@@ -1,0 +1,38 @@
+name: Build Java Lib
+on:
+  workflow_dispatch:
+  workflow_call:
+
+jobs:
+  build-macos-dylib:
+    name:  Build dylib for macos
+    runs-on: macos-latest
+    steps:
+    - uses: actions/checkout@v3
+    - run: brew install llvm@15
+
+    - run: |
+        make CC="clang" CFLAGS="-arch x86_64" -j $(nproc) liboracle.so 
+        mv liboracle.so liboracle-x84_64-macos.dylib
+    - run: |
+        make CC="clang" CFLAGS="-arch arm64" -j $(nproc) liboracle.so 
+        mv liboracle.so liboracle-arm64-macos.dylib
+
+    - uses: actions/upload-artifact@v3
+      with:
+        name: liboralce-macos
+        path: liboracle-x84_64-macos.dylib liboracle-arm64-macos.dylib
+
+  build-linux-dylib:
+    name:  Build dylib for ${{ matrix.os }}
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - run: sudo apt-get install gcc-12
+    - run: |
+        make -j $(nproc) liboracle.so 
+        mv liboracle.so liboracle-x84_64-linux.so
+    - uses: actions/upload-artifact@v3
+      with:
+        name: liboralce-linux
+        path: liboracle-x84_64-linux.so
