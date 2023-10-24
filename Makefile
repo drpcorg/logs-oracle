@@ -1,5 +1,5 @@
 # WARN: duplicated in liboracle.go
-CFLAGS=-std=c11 -pthread -march=native -ffast-math -fPIC -fvisibility=hidden \
+CFLAGS=-std=c11 -pthread -march=native -ffast-math -fvisibility=hidden \
        -Wall -Wextra -Wpedantic -Wnull-dereference -Wvla -Wshadow \
        -Wstrict-prototypes -Wwrite-strings -Wfloat-equal -Wconversion -Wdouble-promotion
 
@@ -28,9 +28,9 @@ liboracle.a: CFLAGS+=-O3
 liboracle.a: $(OBJ)
 	ar rcs -o $@ $^
 
-liboracle.so: CFLAGS+=-O3 -flto
+liboracle.so: CFLAGS+=-O3 -flto -fPIC 
 liboracle.so: $(OBJ)
-	$(CC) $(CFLAGS) -O3 -shared -static-libgcc -o $@ $^
+	$(CC) $(CFLAGS) -shared -o $@ $^
 
 .PHONY: libtest
 # libtest: CFLAGS+=-O0 -g3 -fsanitize=address,undefined
@@ -73,12 +73,13 @@ JAVA_CLASS=$(patsubst %.java,%.class,$(JAVA_SRC))
 jextract:
 	jextract -t org.drpc.logsoracle @java/jextract-includes.txt --source --output java ./liboracle.h
 
-java/LogsOracle.jar: $(JAVA_SRC) liboracle.so
+java/LogsOracle.jar: $(JAVA_SRC)
 	javac --source=20 --enable-preview $(JAVA_SRC:%='%')
 	cd java && \
 		jar cf $(@:java/%=%) $(JAVA_CLASS:java/%='%')
-	# jar uf $@ liboracle.so
 
 .PHONY: java-example
-java-example: java/LogsOracle.jar
-	java --source=20 --enable-preview -cp ".:$^" java/Example.java
+java-example: liboracle.so java/LogsOracle.jar
+	cp liboracle.so liboracle-$(shell uname -m)-linux.so
+	jar uf java/LogsOracle.jar liboracle-$(shell uname -m)-linux.so
+	java --source=20 --enable-preview -cp ".:java/LogsOracle.jar" java/Example.java

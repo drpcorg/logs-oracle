@@ -14,12 +14,35 @@ public class LogsOracle implements AutoCloseable {
 
     static {
         try {
-            URL lib_packed = LogsOracle.class.getResource("/liboracle.so");
+            String lib_filename = "/liboracle-";
+
+            lib_filename += switch (System.getProperty("os.arch").toLowerCase().trim()) {
+                case "x86_64", "amd64" -> "x86_64";
+                case "aarch64", "arm64" -> "arm64";
+                case "i386" -> "i386";
+                default -> throw new IllegalStateException("Unsupported system architecture");
+            };
+
+            String os_name_detect = System.getProperty("os.name").toLowerCase().trim();
+            if (os_name_detect.startsWith("windows")) {
+                lib_filename += "-windows.dll";
+
+                // TODO: windows support
+                throw new IllegalStateException("Unsupported windows");
+            } else if (os_name_detect.startsWith("mac")) {
+                lib_filename += "-macos.dylib";
+            } else if (os_name_detect.startsWith("linux")) {
+                lib_filename += "-linux.so";
+            }
+
+            System.out.println(lib_filename);
+
+            URL lib_packed = LogsOracle.class.getResource(lib_filename);
             if (lib_packed == null) {
                 throw new IOException(lib_packed + " not found");
             }
 
-            Path lib_file = Files.createTempFile("liboracle_java_native", ".so");
+            Path lib_file = Files.createTempFile("liboracle_java_native", ".dynlib");
             Files.copy(lib_packed.openStream(), lib_file, StandardCopyOption.REPLACE_EXISTING);
             new File(lib_file.toString()).deleteOnExit();
 
