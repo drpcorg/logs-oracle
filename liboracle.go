@@ -8,7 +8,7 @@ import (
 	"unsafe"
 )
 
-// #cgo CFLAGS: -std=c11 -pthread -Wall -Wextra -Wpedantic
+// #cgo CFLAGS: -std=c11 -pthread
 // #include "liboracle.h"
 import "C"
 

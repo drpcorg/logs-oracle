@@ -2,29 +2,38 @@
 
 It's a cache answering the question "how many logs will be in the request to the node".
 
-## System Requirements
+LogsOracle consists of several components:
+- [`liboracle`](#c-api): a kernel written in C
+- [`liboracle.go`](#go-api): a Go library implemented through cgo
+- [`LogsOracle.java`](#java-api): Java library implemented via JEP 424
+- [`doracle`](#doracle---rpc-webserver): RPC webserver providing a custom methods for estimating log counts and indexer nodes.
 
+**System Requirements:**
 - 64-bit architecture, AVX2/3 will give a good performance boost;
 - RAM >=16GB, latency is proportional to the amount of memory;
 - SSD or NVMe >=128GB, do not recommend HDD;
 
-## Usage
+## C API
 
-**Local**:
+See [liboracle.h](./liboracle.h)
 
-Install dependencies: [simde](https://github.com/simd-everywhere/simde), [RoaringBitmap](https://github.com/RoaringBitmap/CRoaring), [zstd](https://github.com/facebook/zstd).
+## Go API
 
-Build (required go >= 1.20 and GCC / Clang):
-- `go mod download`
-- `go run . [OPTIONS]`
+See [liboracle.go](./liboracle.go)
 
-**With docker**:
+## Java API
+
+See [LogsOracle.java](./java/org/drpc/logsoracle/LogsOracle.java)
+
+## Doracle - RPC webserver
+
+Run with docker:
 ```sh
 docker build \
   --build-arg="UID=$(id -u)" --build-arg="GID=$(id -g)" \
   -t drpc-logs-oracle .
 
-mkdir -m=0600 ~/.local/share/drpc-logs-oracle # dir for storage
+mkdir -p -m=0600 ~/.local/share/drpc-logs-oracle # dir for storage
 docker run \
   -p 8000:8000 \
   --ulimit memlock=-1:-1 \
