@@ -47,7 +47,12 @@ func NewDB(data_dir string, ram_limit uint64) (*Conn, error) {
 		return nil, err
 	}
 
-	db, err := C.rcl_new(data_dir_cstr, C.uint64_t(ram_limit))
+	var db *C.rcl_t
+	rc := C.rcl_open(data_dir_cstr, C.uint64_t(ram_limit), &db)
+	if rc != C.RCL_SUCCESS {
+		return nil, fmt.Errorf("liboracle: failed connection, code: %d", int(rc))
+	}
+
 	return &Conn{db: db}, err
 }
 
@@ -91,12 +96,16 @@ func (conn *Conn) Query(query *Query) (uint64, error) {
 		}
 	}
 
-	count, err := C.rcl_query(conn.db, (*C.rcl_query_t)(unsafe.Pointer(cquery)))
+	var count C.uint64_t
+	rc := C.rcl_query(conn.db, (*C.rcl_query_t)(unsafe.Pointer(cquery)), &count)
+	if rc != C.RCL_SUCCESS {
+		return 0, fmt.Errorf("liboracle: query failed, code: %d", int(rc))
+	}
 
 	pinner.Unpin()
 	queriesPool.Put(cquery)
 
-	return uint64(count), err
+	return uint64(count), nil
 }
 
 func (conn *Conn) Insert(logs []Log) error {
@@ -104,23 +113,35 @@ func (conn *Conn) Insert(logs []Log) error {
 		return nil
 	}
 
-	err := C.rcl_insert(
+	rc := C.rcl_insert(
 		conn.db,
 		C.size_t(len(logs)),
 		(*C.rcl_log_t)(unsafe.Pointer(&(logs[0]))),
 	)
 
-	if err != 0 {
-		return fmt.Errorf("couldn't insert logs, code: %d", int(err))
+	if rc != C.RCL_SUCCESS {
+		return fmt.Errorf("couldn't insert logs, code: %d", int(rc))
 	}
 
 	return nil
 }
 
-func (conn *Conn) GetLogsCount() uint64 {
-	return uint64(C.rcl_logs_count(conn.db))
+func (conn *Conn) GetLogsCount() (uint64, error) {
+	var result C.uint64_t
+
+	if rc := C.rcl_logs_count(conn.db, &result); rc != C.RCL_SUCCESS {
+		return 0, fmt.Errorf("couldn't get logs count, code: %d", int(rc))
+	}
+
+	return uint64(result), nil
 }
 
-func (conn *Conn) GetBlocksCount() uint64 {
-	return uint64(C.rcl_blocks_count(conn.db))
+func (conn *Conn) GetBlocksCount() (uint64, error) {
+	var result C.uint64_t
+
+	if rc := C.rcl_blocks_count(conn.db, &result); rc != C.RCL_SUCCESS {
+		return 0, fmt.Errorf("couldn't get blocks count, code: %d", int(rc))
+	}
+
+	return uint64(result), nil
 }

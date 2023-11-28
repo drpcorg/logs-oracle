@@ -41,18 +41,42 @@ public class liboracle_h  {
     public static int TOPICS_LENGTH() {
         return (int)4L;
     }
-    public static MethodHandle rcl_new$MH() {
-        return RuntimeHelper.requireNonNull(constants$0.rcl_new$MH,"rcl_new");
+    /**
+     * {@snippet :
+     * enum .RCL_SUCCESS = 0;
+     * }
+     */
+    public static int RCL_SUCCESS() {
+        return (int)0L;
     }
     /**
      * {@snippet :
-     * rcl_t* rcl_new(char* dir, uint64_t ram_limit);
+     * enum .RCL_ERROR_MEMORY_ALLOCATION = 1;
      * }
      */
-    public static MemorySegment rcl_new(MemorySegment dir, long ram_limit) {
-        var mh$ = rcl_new$MH();
+    public static int RCL_ERROR_MEMORY_ALLOCATION() {
+        return (int)1L;
+    }
+    /**
+     * {@snippet :
+     * enum .RCL_ERROR_UNKNOWN = 2;
+     * }
+     */
+    public static int RCL_ERROR_UNKNOWN() {
+        return (int)2L;
+    }
+    public static MethodHandle rcl_open$MH() {
+        return RuntimeHelper.requireNonNull(constants$0.rcl_open$MH,"rcl_open");
+    }
+    /**
+     * {@snippet :
+     * rcl_result rcl_open(char* dir, uint64_t ram_limit, rcl_t** db);
+     * }
+     */
+    public static int rcl_open(MemorySegment dir, long ram_limit, MemorySegment db) {
+        var mh$ = rcl_open$MH();
         try {
-            return (java.lang.foreign.MemorySegment)mh$.invokeExact(dir, ram_limit);
+            return (int)mh$.invokeExact(dir, ram_limit, db);
         } catch (Throwable ex$) {
             throw new AssertionError("should not reach here", ex$);
         }
@@ -73,18 +97,50 @@ public class liboracle_h  {
             throw new AssertionError("should not reach here", ex$);
         }
     }
+    public static MethodHandle rcl_update_height$MH() {
+        return RuntimeHelper.requireNonNull(constants$0.rcl_update_height$MH,"rcl_update_height");
+    }
+    /**
+     * {@snippet :
+     * rcl_result rcl_update_height(rcl_t* db, uint64_t height);
+     * }
+     */
+    public static int rcl_update_height(MemorySegment db, long height) {
+        var mh$ = rcl_update_height$MH();
+        try {
+            return (int)mh$.invokeExact(db, height);
+        } catch (Throwable ex$) {
+            throw new AssertionError("should not reach here", ex$);
+        }
+    }
+    public static MethodHandle rcl_set_upstream$MH() {
+        return RuntimeHelper.requireNonNull(constants$0.rcl_set_upstream$MH,"rcl_set_upstream");
+    }
+    /**
+     * {@snippet :
+     * rcl_result rcl_set_upstream(rcl_t* db, char* upstream);
+     * }
+     */
+    public static int rcl_set_upstream(MemorySegment db, MemorySegment upstream) {
+        var mh$ = rcl_set_upstream$MH();
+        try {
+            return (int)mh$.invokeExact(db, upstream);
+        } catch (Throwable ex$) {
+            throw new AssertionError("should not reach here", ex$);
+        }
+    }
     public static MethodHandle rcl_query$MH() {
         return RuntimeHelper.requireNonNull(constants$0.rcl_query$MH,"rcl_query");
     }
     /**
      * {@snippet :
-     * uint64_t rcl_query(rcl_t* db, rcl_query_t* query);
+     * rcl_result rcl_query(rcl_t* db, rcl_query_t* query, uint64_t* result);
      * }
      */
-    public static long rcl_query(MemorySegment db, MemorySegment query) {
+    public static int rcl_query(MemorySegment db, MemorySegment query, MemorySegment result) {
         var mh$ = rcl_query$MH();
         try {
-            return (long)mh$.invokeExact(db, query);
+            return (int)mh$.invokeExact(db, query, result);
         } catch (Throwable ex$) {
             throw new AssertionError("should not reach here", ex$);
         }
@@ -94,7 +150,7 @@ public class liboracle_h  {
     }
     /**
      * {@snippet :
-     * int rcl_insert(rcl_t* db, size_t size, rcl_log_t* logs);
+     * rcl_result rcl_insert(rcl_t* db, size_t size, rcl_log_t* logs);
      * }
      */
     public static int rcl_insert(MemorySegment db, long size, MemorySegment logs) {
@@ -106,33 +162,33 @@ public class liboracle_h  {
         }
     }
     public static MethodHandle rcl_logs_count$MH() {
-        return RuntimeHelper.requireNonNull(constants$0.rcl_logs_count$MH,"rcl_logs_count");
+        return RuntimeHelper.requireNonNull(constants$1.rcl_logs_count$MH,"rcl_logs_count");
     }
     /**
      * {@snippet :
-     * uint64_t rcl_logs_count(rcl_t* db);
+     * rcl_result rcl_logs_count(rcl_t* db, uint64_t* result);
      * }
      */
-    public static long rcl_logs_count(MemorySegment db) {
+    public static int rcl_logs_count(MemorySegment db, MemorySegment result) {
         var mh$ = rcl_logs_count$MH();
         try {
-            return (long)mh$.invokeExact(db);
+            return (int)mh$.invokeExact(db, result);
         } catch (Throwable ex$) {
             throw new AssertionError("should not reach here", ex$);
         }
     }
     public static MethodHandle rcl_blocks_count$MH() {
-        return RuntimeHelper.requireNonNull(constants$0.rcl_blocks_count$MH,"rcl_blocks_count");
+        return RuntimeHelper.requireNonNull(constants$1.rcl_blocks_count$MH,"rcl_blocks_count");
     }
     /**
      * {@snippet :
-     * uint64_t rcl_blocks_count(rcl_t* db);
+     * rcl_result rcl_blocks_count(rcl_t* db, uint64_t* result);
      * }
      */
-    public static long rcl_blocks_count(MemorySegment db) {
+    public static int rcl_blocks_count(MemorySegment db, MemorySegment result) {
         var mh$ = rcl_blocks_count$MH();
         try {
-            return (long)mh$.invokeExact(db);
+            return (int)mh$.invokeExact(db, result);
         } catch (Throwable ex$) {
             throw new AssertionError("should not reach here", ex$);
         }

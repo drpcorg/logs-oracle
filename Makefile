@@ -19,7 +19,8 @@ liboracle.so: $(SRC) $(HDR)
 
 TESTS=$(wildcard test/*_test.c)
 
-# libtest: CFLAGS+=-std=c2x -O0 -g3 -fsanitize=address,undefined
+# -fsanitize=address,undefined
+libtest: CFLAGS+=-std=c2x -O0 -g3
 libtest: $(SRC) $(HDR) $(TESTS)
 	$(CC) $(CFLAGS) $(shell pkg-config --cflags --libs criterion) -o $@ $(SRC) $(TESTS)
 	./$@

@@ -11,13 +11,14 @@ final class constants$0 {
 
     // Suppresses default constructor, ensuring non-instantiability.
     private constants$0() {}
-    static final FunctionDescriptor rcl_new$FUNC = FunctionDescriptor.of(Constants$root.C_POINTER$LAYOUT,
+    static final FunctionDescriptor rcl_open$FUNC = FunctionDescriptor.of(Constants$root.C_INT$LAYOUT,
         Constants$root.C_POINTER$LAYOUT,
-        Constants$root.C_LONG_LONG$LAYOUT
+        Constants$root.C_LONG_LONG$LAYOUT,
+        Constants$root.C_POINTER$LAYOUT
     );
-    static final MethodHandle rcl_new$MH = RuntimeHelper.downcallHandle(
-        "rcl_new",
-        constants$0.rcl_new$FUNC
+    static final MethodHandle rcl_open$MH = RuntimeHelper.downcallHandle(
+        "rcl_open",
+        constants$0.rcl_open$FUNC
     );
     static final FunctionDescriptor rcl_free$FUNC = FunctionDescriptor.ofVoid(
         Constants$root.C_POINTER$LAYOUT
@@ -26,7 +27,24 @@ final class constants$0 {
         "rcl_free",
         constants$0.rcl_free$FUNC
     );
-    static final FunctionDescriptor rcl_query$FUNC = FunctionDescriptor.of(Constants$root.C_LONG_LONG$LAYOUT,
+    static final FunctionDescriptor rcl_update_height$FUNC = FunctionDescriptor.of(Constants$root.C_INT$LAYOUT,
+        Constants$root.C_POINTER$LAYOUT,
+        Constants$root.C_LONG_LONG$LAYOUT
+    );
+    static final MethodHandle rcl_update_height$MH = RuntimeHelper.downcallHandle(
+        "rcl_update_height",
+        constants$0.rcl_update_height$FUNC
+    );
+    static final FunctionDescriptor rcl_set_upstream$FUNC = FunctionDescriptor.of(Constants$root.C_INT$LAYOUT,
+        Constants$root.C_POINTER$LAYOUT,
+        Constants$root.C_POINTER$LAYOUT
+    );
+    static final MethodHandle rcl_set_upstream$MH = RuntimeHelper.downcallHandle(
+        "rcl_set_upstream",
+        constants$0.rcl_set_upstream$FUNC
+    );
+    static final FunctionDescriptor rcl_query$FUNC = FunctionDescriptor.of(Constants$root.C_INT$LAYOUT,
+        Constants$root.C_POINTER$LAYOUT,
         Constants$root.C_POINTER$LAYOUT,
         Constants$root.C_POINTER$LAYOUT
     );
@@ -42,20 +60,6 @@ final class constants$0 {
     static final MethodHandle rcl_insert$MH = RuntimeHelper.downcallHandle(
         "rcl_insert",
         constants$0.rcl_insert$FUNC
-    );
-    static final FunctionDescriptor rcl_logs_count$FUNC = FunctionDescriptor.of(Constants$root.C_LONG_LONG$LAYOUT,
-        Constants$root.C_POINTER$LAYOUT
-    );
-    static final MethodHandle rcl_logs_count$MH = RuntimeHelper.downcallHandle(
-        "rcl_logs_count",
-        constants$0.rcl_logs_count$FUNC
-    );
-    static final FunctionDescriptor rcl_blocks_count$FUNC = FunctionDescriptor.of(Constants$root.C_LONG_LONG$LAYOUT,
-        Constants$root.C_POINTER$LAYOUT
-    );
-    static final MethodHandle rcl_blocks_count$MH = RuntimeHelper.downcallHandle(
-        "rcl_blocks_count",
-        constants$0.rcl_blocks_count$FUNC
     );
 }
 

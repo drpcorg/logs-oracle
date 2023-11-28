@@ -4,6 +4,10 @@
 --include-constant HASH_LENGTH      # header: liboracle.h
 --include-constant TOPICS_LENGTH    # header: liboracle.h
 
+--include-constant RCL_SUCCESS                  # header: liboracle.h
+--include-constant RCL_ERROR_MEMORY_ALLOCATION  # header: liboracle.h
+--include-constant RCL_ERROR_UNKNOWN            # header: liboracle.h
+
 --include-struct db                 # header: liboracle.h
 
 --include-typedef rcl_t             # header: liboracle.h
@@ -12,9 +16,11 @@
 --include-typedef rcl_log_t         # header: liboracle.h
 --include-typedef rcl_query_t       # header: liboracle.h
 
---include-function rcl_blocks_count # header: liboracle.h
---include-function rcl_free         # header: liboracle.h
---include-function rcl_insert       # header: liboracle.h
---include-function rcl_logs_count   # header: liboracle.h
---include-function rcl_new          # header: liboracle.h
---include-function rcl_query        # header: liboracle.h
+--include-function rcl_open             # header: liboracle.h
+--include-function rcl_free             # header: liboracle.h
+--include-function rcl_update_height    # header: liboracle.h
+--include-function rcl_set_upstream     # header: liboracle.h
+--include-function rcl_query            # header: liboracle.h
+--include-function rcl_insert           # header: liboracle.h
+--include-function rcl_logs_count       # header: liboracle.h
+--include-function rcl_blocks_count     # header: liboracle.h

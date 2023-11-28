@@ -3,13 +3,14 @@ package org.drpc.logsoracle;
 import static java.lang.foreign.MemorySegment.NULL;
 
 import java.io.*;
-import java.lang.foreign.Arena;
-import java.lang.foreign.MemorySegment;
+import java.lang.UnsupportedOperationException;
+import java.lang.foreign.*;
 import java.net.URL;
 import java.nio.file.*;
+import java.util.List;
 
 public class LogsOracle implements AutoCloseable {
-    private Arena arena;
+    private Arena arena = Arena.openShared();
     private MemorySegment connPtr;
 
     static {
@@ -53,29 +54,62 @@ public class LogsOracle implements AutoCloseable {
     }
 
     public LogsOracle(String dir, long ram_limit) throws Exception {
-        arena = Arena.openShared();
+        var dbPtr = arena.allocate(liboracle_h.C_POINTER);
+        int rc = liboracle_h.rcl_open(arena.allocateUtf8String(dir), 0L, dbPtr);
+        if (rc != liboracle_h.RCL_SUCCESS()) {
+            throw new Exception("liboracle connection failed");
+        } else {
+            connPtr = dbPtr.get(liboracle_h.C_POINTER, 0);
+        }
+    }
 
-        connPtr = liboracle_h.rcl_new(arena.allocateUtf8String(dir), 0L);
-        if (connPtr.equals(NULL)) {
+    public void UpdateHeight(Long height) throws Exception {
+        int rc = liboracle_h.rcl_update_height(connPtr, height);
+        if (rc != liboracle_h.RCL_SUCCESS()) {
+            throw new Exception("liboracle failed");
+        }
+    }
+
+    public void SetUpstream(String upstream) throws Exception {
+        int rc = liboracle_h.rcl_set_upstream(connPtr, arena.allocateUtf8String(upstream));
+        if (rc != liboracle_h.RCL_SUCCESS()) {
             throw new Exception("liboracle connection failed");
         }
     }
 
-    public long query() throws Exception {
-        // liboracle_h.rcl_query(connPtr);
-        return 0L;
+    public long Query(
+        Long fromBlock,
+        Long toBlock,
+        List<String> address,
+        List<List<String>> topics
+    ) throws Exception {
+        // TODO: liboracle_h.rcl_query(connPtr);
+        throw new UnsupportedOperationException();
     }
 
-    public void insert() throws Exception {
-        // liboracle_h.rcl_insert(connPtr);
+    public void Insert() throws Exception {
+        // TODO: liboracle_h.rcl_insert(connPtr);
+        throw new UnsupportedOperationException();
     }
 
-    public long GetLogsCount() {
-        return liboracle_h.rcl_logs_count(connPtr);
+    public long GetLogsCount() throws Exception {
+        var result = arena.allocate(liboracle_h.C_POINTER);
+
+        int rc = liboracle_h.rcl_logs_count(connPtr, result);
+        if (rc != liboracle_h.RCL_SUCCESS())
+            throw new Exception("liboracle failed");
+
+        return result.get(ValueLayout.JAVA_LONG, 0);
     }
 
-    public long GetBlocksCount() {
-        return liboracle_h.rcl_blocks_count(connPtr);
+    public long GetBlocksCount() throws Exception {
+        var result = arena.allocate(liboracle_h.C_POINTER);
+
+        int rc = liboracle_h.rcl_blocks_count(connPtr, result);
+        if (rc != liboracle_h.RCL_SUCCESS())
+            throw new Exception("liboracle failed");
+
+        return result.get(ValueLayout.JAVA_LONG, 0);
     }
 
     @Override

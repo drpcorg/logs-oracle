@@ -101,7 +101,7 @@ func main() {
 		wg.Add(1)
 		defer wg.Done()
 
-		start := app.Db.GetBlocksCount()
+		start, _ := app.Db.GetBlocksCount()
 
 		errs := make(chan error)
 		logs := make(chan []types.Log, 64)
@@ -208,10 +208,13 @@ func main() {
 	}
 
 	e.GET("/status", func(c echo.Context) error {
+		blocks, _ := app.Db.GetBlocksCount()
+		logs, _ := app.Db.GetLogsCount()
+
 		return c.String(http.StatusOK, fmt.Sprintf(
 			"blocks_count: %lu\nlogs_count:  %lu\n",
-			app.Db.GetBlocksCount(),
-			app.Db.GetLogsCount(),
+			blocks,
+			logs,
 		))
 	})
 	e.POST("/rpc", func(c echo.Context) error {

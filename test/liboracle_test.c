@@ -132,8 +132,9 @@ rcl_t* db_make(void) {
     return NULL;
   }
 
-  rcl_t* db = rcl_new(tmpl, 0);
-  cr_assert(db != NULL, "Expected db connection is a NULL");
+  rcl_t* db = NULL;
+  rcl_result status = rcl_open(tmpl, 0, &db);
+  cr_assert(status == RCL_SUCCESS, "Expected sucessful db connection");
 
   return db;
 }
@@ -167,8 +168,10 @@ rcl_t* db_make_filled(void) {
   int err = rcl_insert(db, sizeof(s) / sizeof(s[0]), s);
   cr_expect(err == 0, "Expected sucessfull insert");
 
-  uint64_t blocks = rcl_blocks_count(db);
-  cr_expect(blocks == 7, "Expected 7 logs after insert test suite");
+  uint64_t blocks;
+  rcl_result result = rcl_blocks_count(db, &blocks);
+  cr_expect(result == RCL_SUCCESS && blocks == 7,
+            "Expected 7 logs after insert test suite");
 
   return db;
 }
@@ -203,7 +206,7 @@ uint64_t db_make_query(rcl_t* db,
       continue;
 
     q.topics[i].len = tpcs[i].size;
-    q.topics[i].data = malloc(sizeof(rcl_address_t) * tpcs[i].size);
+    q.topics[i].data = malloc(sizeof(rcl_hash_t) * tpcs[i].size);
 
     for (size_t j = 0; j < tpcs[i].size; ++j) {
       uint64_t k = *(uint64_t*)vector_at(&tpcs[i], j);
@@ -212,7 +215,9 @@ uint64_t db_make_query(rcl_t* db,
   }
 
   // Exec query
-  uint64_t actual = rcl_query(db, &q);
+  uint64_t actual;
+  rcl_result result = rcl_query(db, &q, &actual);
+  cr_expect(result == RCL_SUCCESS, "Expected sucessful query");
 
   // Clenup
   if (ad.size)
@@ -241,11 +246,13 @@ uint64_t db_make_query(rcl_t* db,
 Test(liboracle, New) {
   rcl_t* db = db_make();
 
-  uint64_t logs = rcl_logs_count(db);
-  cr_expect(logs == 0, "Expected 0 blocks in new DB");
+  uint64_t logs;
+  rcl_result r1 = rcl_logs_count(db, &logs);
+  cr_expect(r1 == RCL_SUCCESS && logs == 0, "Expected 0 blocks in new DB");
 
-  uint64_t blocks = rcl_blocks_count(db);
-  cr_expect(blocks == 0, "Expected 0 logs in new DB");
+  uint64_t blocks;
+  rcl_result r2 = rcl_blocks_count(db, &blocks);
+  cr_expect(r2 == RCL_SUCCESS && blocks == 0, "Expected 0 logs in new DB");
 
   rcl_free(db);
 }
@@ -259,8 +266,9 @@ Test(liboracle, EmptyInsert) {
   int err = rcl_insert(db, 0, NULL);
   cr_expect(err == 0, "Expected sucessfull insert");
 
-  uint64_t blocks = rcl_blocks_count(db);
-  cr_expect(blocks == 0, "Expected 0 logs in new DB");
+  uint64_t blocks;
+  rcl_result r = rcl_blocks_count(db, &blocks);
+  cr_expect(r == RCL_SUCCESS && blocks == 0, "Expected 0 logs in new DB");
 
   rcl_free(db);
 }

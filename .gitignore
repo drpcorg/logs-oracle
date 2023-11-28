@@ -11,7 +11,7 @@ libtest
 *.test
 
 **/.env
-doracle/_data
+**/_data
 doracle/doracle
 
 .gdb_history
