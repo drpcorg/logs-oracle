@@ -66,9 +66,9 @@ DATA_DIR string
 RAM_LIMIT string (default "16GB")
   RAM limit for disk cache
 
-NODE_ADDR string
+NODE_RPC string
   ethereum json rpc endpoint url
 
-NODE_BATCH uint (default 512)
-  count of block for one request to node
+NODE_WS string
+  ethereum json ws endpoint url
 ```

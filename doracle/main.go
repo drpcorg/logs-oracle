@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/labstack/echo-contrib/echoprometheus"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
@@ -40,7 +39,7 @@ func CreateApp(ctx context.Context) (*App, error) {
 		return nil, fmt.Errorf("Couldn't load db: %w", err)
 	}
 
-	node, err := CreateNode(ctx, config.NodeAddr, config.NodeBatch)
+	node, err := CreateNode(ctx, config.NodeWS)
 	if err != nil {
 		return nil, err
 	}
@@ -95,41 +94,22 @@ func main() {
 	initLogger(app.Config.IsDev())
 
 	// Background
-	go app.Node.SubscribeNewHead(ctx, &wg)
-
+	app.Db.SetUpstream(app.Config.NodeRPC)
 	go func() {
 		wg.Add(1)
 		defer wg.Done()
 
-		start, _ := app.Db.GetBlocksCount()
-
-		errs := make(chan error)
-		logs := make(chan []types.Log, 64)
-		go app.Node.SubscribeBlocks(ctx, &wg, start, logs, errs)
+		headch := make(chan *big.Int)
+		go app.Node.SubscribeNewHead(ctx, &wg, headch)
 
 		for {
 			select {
-			case err := <-errs:
-				log.Error().Err(err).Msg("Failed sync with node")
-				continue
-
-			case data := <-logs:
-				dbLogs := make([]liboracle.Log, len(data))
-
-				for i, log := range data {
-					dbLogs[i].BlockNumber = log.BlockNumber
-					dbLogs[i].Address = liboracle.Address(log.Address.Bytes())
-
-					for j, topic := range log.Topics {
-						dbLogs[i].Topics[j] = liboracle.Hash(topic.Bytes())
-					}
-				}
-
-				if err := app.Db.Insert(dbLogs); err != nil {
-					log.Error().Err(err).Msg("couldn't insert logs in db")
+			case data := <-headch:
+				if err := app.Db.UpdateHeight(data.Uint64()); err != nil {
+					log.Error().Err(err).Msg("couldn't update height in db")
 					return
 				} else {
-					log.Debug().Int("count", len(dbLogs)).Msg("inserted new logs in db")
+					log.Debug().Int64("head", data.Int64()).Msg("updated head in db")
 				}
 
 			case <-ctx.Done():
@@ -212,7 +192,7 @@ func main() {
 		logs, _ := app.Db.GetLogsCount()
 
 		return c.String(http.StatusOK, fmt.Sprintf(
-			"blocks_count: %lu\nlogs_count:  %lu\n",
+			"blocks_count: %d\nlogs_count:  %d\n",
 			blocks,
 			logs,
 		))

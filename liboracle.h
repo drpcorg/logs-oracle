@@ -13,8 +13,14 @@ enum { HASH_LENGTH = 32, ADDRESS_LENGTH = 20, TOPICS_LENGTH = 4 };
 
 typedef enum {
   RCL_SUCCESS = 0,
+
+  // User errors
+  RCL_ERROR_INSERT_LOGS_TO_OLD_BLOCK,
   RCL_ERROR_INVALID_UPSTREAM,
+
+  // Environment errors
   RCL_ERROR_MEMORY_ALLOCATION,
+  RCL_ERROR_FS_IO,
   RCL_ERROR_UNKNOWN,
 } rcl_result;
 

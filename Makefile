@@ -1,8 +1,8 @@
-CFLAGS=-std=c11 -pthread -march=native -ffast-math -fvisibility=hidden \
+CFLAGS=-std=gnu11 -pthread -march=native -ffast-math -fvisibility=hidden \
        -Wall -Wextra -Wpedantic -Wnull-dereference -Wvla -Wshadow \
        -Wstrict-prototypes -Wwrite-strings -Wfloat-equal -Wconversion -Wdouble-promotion
 
-CFLAGS=$(shell pkg-config --cflags --libs libzstd libcurl)
+CFLAGS+=$(shell pkg-config --cflags --libs libcurl jansson)
 
 # Find sources
 ALL=$(wildcard *.c *.h)
@@ -10,7 +10,7 @@ ALL=$(wildcard *.c *.h)
 HDR=$(filter %.h, $(ALL))
 SRC=$(filter %.c, $(ALL))
 
-liboracle.so: CFLAGS+=-O3 -fPIC 
+liboracle.so: CFLAGS+=-O3 -fPIC
 liboracle.so: $(SRC) $(HDR)
 	$(CC) $(CFLAGS) -shared -o $@ $(SRC)
 
@@ -20,7 +20,7 @@ liboracle.so: $(SRC) $(HDR)
 TESTS=$(wildcard test/*_test.c)
 
 # -fsanitize=address,undefined
-libtest: CFLAGS+=-std=c2x -O0 -g3
+libtest: CFLAGS+=-std=gnu2x -O0 -g3
 libtest: $(SRC) $(HDR) $(TESTS)
 	$(CC) $(CFLAGS) $(shell pkg-config --cflags --libs criterion) -o $@ $(SRC) $(TESTS)
 	./$@
@@ -28,11 +28,11 @@ libtest: $(SRC) $(HDR) $(TESTS)
 # Doracle (go wrapper server)
 .PHONY: doracle-build doracle-dev
 
+doracle-dev: export CGO_CFLAGS=-fsanitize=address -O0 -g
+doracle-dev: export CGO_LDFLAGS=-fsanitize=address 
 doracle-build:
-	cd doracle && go build -gcflags "all=-N -l -L" .
+	cd doracle && go build -gcflags "all=-N -l" .
 
-doracle-dev: export CGO_CFLAGS=-fsanitize=address,undefined -O0 -g
-doracle-dev: export CGO_LDFLAGS=-fsanitize=address,undefined 
 doracle-dev: doracle-build
 	./doracle/doracle
 
@@ -60,6 +60,7 @@ java-example: liboracle.so java/LogsOracle.jar
 
 clean:
 	find -type f -regex '.*\.\(o\|d\|a\|so\|class\)' -exec rm -f {} \;
+	rm -f doracle/doracle
 
 format:
 	go fmt ./...

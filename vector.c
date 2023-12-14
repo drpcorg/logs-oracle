@@ -1,8 +1,12 @@
 #include "vector.h"
+#include "common.h"
 
-void vector_init(vector_t* v, uint64_t capacity, uint64_t item_size) {
+bool vector_init(vector_t* v, uint64_t capacity, uint64_t item_size) {
   if (capacity > 0) {
     v->buffer = malloc(item_size * capacity);
+    if (rcl_unlikely(v->buffer == NULL)) {
+      return false;
+    }
   } else {
     v->buffer = NULL;
   }
@@ -10,6 +14,8 @@ void vector_init(vector_t* v, uint64_t capacity, uint64_t item_size) {
   v->size = 0;
   v->item_size = item_size;
   v->capacity = capacity;
+
+  return true;
 }
 
 void vector_destroy(vector_t* v) {

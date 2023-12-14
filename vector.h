@@ -10,7 +10,7 @@ typedef struct {
   uint64_t item_size;
 } vector_t;
 
-void vector_init(vector_t* vector, uint64_t capacity, uint64_t item_size);
+bool vector_init(vector_t* vector, uint64_t capacity, uint64_t item_size);
 void vector_destroy(vector_t* vector);
 
 void* vector_add(vector_t* vector);

@@ -26,7 +26,6 @@ var (
 
 type Node struct {
 	addr  string
-	batch uint64
 
 	safe      atomic.Pointer[big.Int]
 	finalized atomic.Pointer[big.Int]
@@ -36,7 +35,7 @@ type Node struct {
 	client *ethclient.Client
 }
 
-func CreateNode(ctx context.Context, addr string, batch uint64) (*Node, error) {
+func CreateNode(ctx context.Context, addr string) (*Node, error) {
 	eth, err := ethclient.DialContext(ctx, addr)
 	if err != nil {
 		return nil, fmt.Errorf("Couln't connect to node: %w", err)
@@ -44,7 +43,6 @@ func CreateNode(ctx context.Context, addr string, batch uint64) (*Node, error) {
 
 	node := &Node{
 		client: eth,
-		batch:  batch,
 	}
 
 	if err := node.UpdateHead(ctx); err != nil {
@@ -99,7 +97,7 @@ func (h *Node) UpdateHead(ctx context.Context) error {
 	return nil
 }
 
-func (n *Node) SubscribeNewHead(ctx context.Context, wg *sync.WaitGroup) {
+func (n *Node) SubscribeNewHead(ctx context.Context, wg *sync.WaitGroup, headch chan<- *big.Int) {
 	if wg != nil {
 		wg.Add(1)
 		defer wg.Done()
@@ -138,6 +136,7 @@ func (n *Node) SubscribeNewHead(ctx context.Context, wg *sync.WaitGroup) {
 			if err := n.UpdateHead(ctx); err != nil {
 				log.Error().Err(err).Msg("couldn't load current head")
 			}
+			headch <- n.FinalizedBlock()
 
 			log.Debug().
 				Str("safe", n.SafeBlock().String()).
@@ -145,95 +144,6 @@ func (n *Node) SubscribeNewHead(ctx context.Context, wg *sync.WaitGroup) {
 				Str("latest", n.LatestBlock().String()).
 				Str("pending", n.PendingBlock().String()).
 				Msg("new head")
-		}
-	}
-}
-
-func (n *Node) forceLoadLogs(ctx context.Context, start uint64, cl chan<- []types.Log, ce chan<- error) {
-	last := n.LatestBlock().Uint64()
-
-	attempt := 0
-	for from := start; from <= last && !errors.Is(ctx.Err(), context.Canceled); {
-		to := from + n.batch
-		if to > last {
-			to = last
-		}
-
-		data, err := n.client.FilterLogs(ctx, ethereum.FilterQuery{
-			FromBlock: new(big.Int).SetUint64(from),
-			ToBlock:   new(big.Int).SetUint64(to),
-		})
-
-		if err != nil {
-			if attempt < 8 {
-				attempt++
-				time.Sleep(time.Second * 5)
-
-				continue
-			} else {
-				ce <- fmt.Errorf("couldn't load logs: %w", err)
-				return
-			}
-		} else {
-			attempt = 0
-		}
-
-		from = to + 1
-		if len(data) > 0 {
-			cl <- data
-		}
-	}
-}
-
-func (n *Node) SubscribeBlocks(ctx context.Context, wg *sync.WaitGroup, start uint64, cl chan<- []types.Log, ce chan<- error) {
-	if wg != nil {
-		wg.Add(1)
-		defer wg.Done()
-	}
-
-	log := zerolog.Ctx(ctx)
-
-	n.forceLoadLogs(ctx, start, cl, ce)
-
-	ch := make(chan types.Log)
-
-	var sub ethereum.Subscription
-	var err error
-
-	for ; ; time.Sleep(time.Second * 5) {
-		if errors.Is(ctx.Err(), context.Canceled) {
-			return
-		}
-
-		sub, err = n.client.SubscribeFilterLogs(ctx, ethereum.FilterQuery{}, ch)
-		if err != nil {
-			log.Error().Err(err).Msg("Failed subscribe to NewHead")
-		} else {
-			break
-		}
-	}
-	defer sub.Unsubscribe()
-
-	bufferSize := 1024
-	buffer := make([]types.Log, 0, bufferSize)
-
-	for {
-		select {
-		case err := <-sub.Err():
-			ce <- err
-			return
-
-		case <-ctx.Done():
-			return
-
-		case log := <-ch:
-			buffer = append(buffer, log)
-
-			if len(buffer) >= bufferSize {
-				cl <- buffer
-
-				buffer = make([]types.Log, 0, bufferSize)
-			}
 		}
 	}
 }

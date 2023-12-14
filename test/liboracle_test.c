@@ -8,20 +8,6 @@
 #include "../liboracle.h"
 #include "../vector.h"
 
-static uint32_t randseed = 0;
-static uint32_t xorshift32(void) {
-  if (randseed == 0)
-    randseed = (uint32_t)time(NULL);
-
-  uint32_t x = randseed;
-
-  x ^= x << 13;
-  x ^= x >> 7;
-  x ^= x << 17;
-
-  return randseed = x;
-}
-
 static int mkdirp(char* path) {
   static const char tempchars[] =
       "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
@@ -43,15 +29,6 @@ static int mkdirp(char* path) {
   }
 
   return -1;
-}
-
-void hex2bin(uint8_t* b, const char* str, int bytes) {
-  unsigned int tmp;
-
-  for (int i = 0; i < bytes; ++i) {
-    sscanf(str + i * 2, "%02X", &tmp);
-    b[i] = (uint8_t)tmp;
-  }
 }
 
 vector_t make_uint64_vector(size_t n, ...) {

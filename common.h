@@ -7,6 +7,7 @@
 #include <inttypes.h>
 #include <pthread.h>
 #include <stdarg.h>
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -16,7 +17,11 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <time.h>
 #include <unistd.h>
+
+#include <curl/curl.h>
+#include <jansson.h>
 
 // Section: lang defines
 
@@ -109,6 +114,29 @@ rcl_inline uint64_t murmur64A(const void* key,
   h ^= h >> r;
 
   return h;
+}
+
+rcl_inline uint32_t xorshift32(void) {
+  static uint32_t randseed = 0;
+  if (randseed == 0)
+    randseed = (uint32_t)time(NULL);
+
+  uint32_t x = randseed;
+
+  x ^= x << 13;
+  x ^= x >> 7;
+  x ^= x << 17;
+
+  return randseed = x;
+}
+
+rcl_inline void hex2bin(uint8_t* b, const char* str, int bytes) {
+  unsigned int tmp;
+
+  for (int i = 0; i < bytes; ++i) {
+    sscanf(str + i * 2, "%02X", &tmp);
+    b[i] = (uint8_t)tmp;
+  }
 }
 
 #endif  // _RCL_COMMON_H

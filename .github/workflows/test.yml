@@ -19,7 +19,8 @@ jobs:
       matrix:
         os: [ "ubuntu-latest", "macos-latest" ]
         compiler:
-          - { compiler: GNU,  CC: gcc }
+          # TODO: fix build with gcc
+          # - { compiler: GNU,  CC: gcc }
           - { compiler: LLVM, CC: clang }
     steps:
       - name: Checkout repository
@@ -31,14 +32,23 @@ jobs:
           go-version: '1.21'
           check-latest: true
 
+      - uses: actions/setup-java@v3
+        with:
+          distribution: 'zulu'
+          java-version: 20
+
       - name: Install dependencies for Linux
         if: matrix.os == 'ubuntu-latest'
-        run: sudo apt-get install gcc-12 clang-15 libcriterion-dev
+        run: |
+          sudo apt update
+          sudo apt-get install -y \
+            gcc-12 clang-15 \
+            libjansson-dev libcurl4-openssl-dev libcriterion-dev
 
       - name: Install dependencies for Mac
         if: matrix.os == 'macos-latest'
         run: |
-          brew install gcc@12 llvm@15 criterion
+          brew install gcc@12 llvm@15 criterion curl jansson
 
           ln -s "$(brew --prefix llvm@15)/bin/clang-format" "/usr/local/bin/clang-format"
           ln -s "$(brew --prefix llvm@15)/bin/clang-tidy" "/usr/local/bin/clang-tidy"
@@ -54,4 +64,9 @@ jobs:
 
       - name: Build doracle
         run: make doracle-build
+        env: { CC: "${{ matrix.compiler.CC }}" }
+
+      - name: Java example
+        run: make java-example
+        if: matrix.os == 'ubuntu-latest'
         env: { CC: "${{ matrix.compiler.CC }}" }

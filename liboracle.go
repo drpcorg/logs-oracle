@@ -8,7 +8,8 @@ import (
 	"unsafe"
 )
 
-// #cgo CFLAGS: -std=c11 -pthread
+// #cgo CFLAGS: -std=gnu11 -pthread
+// #cgo pkg-config: libcurl jansson
 // #include "liboracle.h"
 import "C"
 
@@ -58,6 +59,27 @@ func NewDB(data_dir string, ram_limit uint64) (*Conn, error) {
 
 func (conn *Conn) Close() {
 	C.rcl_free(conn.db)
+}
+
+func (conn *Conn) UpdateHeight(height uint64) error {
+	rc := C.rcl_update_height(conn.db, C.uint64_t(height))
+	if rc != C.RCL_SUCCESS {
+		return fmt.Errorf("liboracle: failed rcl_update_height, code: %d", int(rc))
+	}
+
+	return nil
+}
+
+func (conn *Conn) SetUpstream(upstream string) error {
+	upstream_cstr := C.CString(upstream)
+	defer C.free(unsafe.Pointer(upstream_cstr))
+
+	rc := C.rcl_set_upstream(conn.db, upstream_cstr)
+	if rc != C.RCL_SUCCESS {
+		return fmt.Errorf("liboracle: failed rcl_update_height, code: %d", int(rc))
+	}
+
+	return nil
 }
 
 func (conn *Conn) Query(query *Query) (uint64, error) {
