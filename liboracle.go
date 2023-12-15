@@ -25,8 +25,8 @@ type Log struct { // see rcl_log_t
 type Query struct { // see rcl_query_t
 	FromBlock uint64
 	ToBlock   uint64
-	Addresses []Address
-	Topics    [][]Hash
+	Addresses []string
+	Topics    [][]string
 }
 
 var queriesPool = sync.Pool{
@@ -91,14 +91,25 @@ func (conn *Conn) Query(query *Query) (uint64, error) {
 	cquery.from_block = C.uint64_t(query.FromBlock)
 	cquery.to_block = C.uint64_t(query.ToBlock)
 
-	cquery.addresses.len = C.size_t(len(query.Addresses))
-	cquery.addresses.data = nil
+	cquery.address.len = C.size_t(len(query.Addresses))
+	cquery.address.data = nil
 
 	if len(query.Addresses) > 0 {
-		ptr := &(query.Addresses[0])
+		tmp := make([](*C.char), len(query.Addresses))
+		for i := 0; i < len(query.Addresses); i++ {
+			tmp[i] = C.CString(query.Addresses[i]);
+		}
+
+		defer func() {
+			for i := 0; i < len(query.Addresses); i++ {
+				C.free(unsafe.Pointer(tmp[i]));
+			}
+		}();
+
+		ptr := &tmp
 		pinner.Pin(ptr)
 
-		cquery.addresses.data = (*C.rcl_address_t)(unsafe.Pointer(ptr))
+		cquery.address.data = (**C.char)(unsafe.Pointer(ptr))
 	}
 
 	if len(query.Topics) > len(cquery.topics) {
@@ -110,11 +121,22 @@ func (conn *Conn) Query(query *Query) (uint64, error) {
 		cquery.topics[i].data = nil
 
 		if len(query.Topics) > i && len(query.Topics[i]) > 0 {
-			ptr := &(query.Topics[i][0])
+			tmp := make([](*C.char), len(query.Topics[i]))
+			for j := 0; j < len(query.Topics[j]); j++ {
+				tmp[j] = C.CString(query.Topics[j][j]);
+			}
+
+			defer func() {
+				for j := 0; j < len(query.Topics[i]); j++ {
+					C.free(unsafe.Pointer(tmp[j]));
+				}
+			}();
+
+			ptr := &tmp
 			pinner.Pin(ptr)
 
 			cquery.topics[i].len = C.size_t(len(query.Topics[i]))
-			cquery.topics[i].data = (*C.rcl_hash_t)(unsafe.Pointer(ptr))
+			cquery.topics[i].data = (**C.char)(unsafe.Pointer(ptr))
 		}
 	}
 

@@ -1,10 +1,10 @@
 #include "liboracle.h"
 
-#include "common.h"
 #include "bloom.h"
+#include "common.h"
 #include "file.h"
-#include "vector.h"
 #include "loader.h"
+#include "vector.h"
 
 #define UPSTREAM_LIMIT 4096
 
@@ -20,11 +20,19 @@ typedef struct {
 } rcl_block_t;
 
 static bool rcl_block_check(rcl_block_t* block, rcl_query_t* query) {
-  if (query->addresses.len > 0) {
+  rcl_hash_t hash;
+  rcl_address_t address;
+
+  if (query->address.len > 0) {
     bool has = false;
 
-    for (size_t i = 0; i < query->addresses.len; ++i) {
-      if (bloom_check(&(block->logs_bloom), query->addresses.data[i])) {
+    for (size_t i = 0; i < query->address.len; ++i) {
+      if (hex2bin(address, query->address.data[i], sizeof(rcl_address_t)) !=
+          0) {
+        continue;  // ignore invalid
+      }
+
+      if (bloom_check(&(block->logs_bloom), address)) {
         has = true;
         break;
       }
@@ -40,11 +48,16 @@ static bool rcl_block_check(rcl_block_t* block, rcl_query_t* query) {
 
     bool current_has = false;
 
-    for (size_t j = 0; j < query->topics[i].len; ++j)
-      if (bloom_check(&(block->logs_bloom), query->topics[i].data[j])) {
+    for (size_t j = 0; j < query->topics[i].len; ++j) {
+      if (hex2bin(hash, query->topics[i].data[j], sizeof(rcl_hash_t)) != 0) {
+        continue;  // ignore invalid
+      }
+
+      if (bloom_check(&(block->logs_bloom), hash)) {
         current_has = true;
         break;
       }
+    }
 
     if (!current_has)
       return false;
@@ -436,15 +449,20 @@ rcl_result rcl_insert(rcl_t* db, size_t size, rcl_log_t* logs) {
 rcl_result rcl_query(rcl_t* db, rcl_query_t* query, uint64_t* result) {
   // TODO: use memory pool
   // Prepare internal view
-  bool has_addresses = query->addresses.len > 0, has_topics = false;
+  bool has_addresses = query->address.len > 0, has_topics = false;
 
   rcl_cell_address_t* addresses = NULL;
   if (has_addresses) {
-    addresses = malloc(query->addresses.len * sizeof(rcl_cell_address_t));
+    addresses = malloc(query->address.len * sizeof(rcl_cell_address_t));
 
-    for (size_t i = 0; i < query->addresses.len; ++i) {
-      addresses[i] =
-          murmur64A(query->addresses.data[i], sizeof(rcl_address_t), HASH_SEED);
+    for (size_t i = 0; i < query->address.len; ++i) {
+      rcl_address_t address;
+      if (hex2bin(address, query->address.data[i], sizeof(rcl_address_t)) !=
+          0) {
+        return RCL_ERROR_UNKNOWN;
+      }
+
+      addresses[i] = murmur64A(address, sizeof(rcl_address_t), HASH_SEED);
     }
   }
 
@@ -454,8 +472,13 @@ rcl_result rcl_query(rcl_t* db, rcl_query_t* query, uint64_t* result) {
 
     for (size_t j = 0; j < query->topics[i].len; ++j) {
       has_topics = true;
-      topics[i][j] =
-          murmur64A(query->topics[i].data[j], sizeof(rcl_hash_t), HASH_SEED);
+
+      rcl_hash_t hash;
+      if (hex2bin(hash, query->topics[i].data[j], sizeof(rcl_hash_t)) != 0) {
+        return RCL_ERROR_UNKNOWN;
+      }
+
+      topics[i][j] = murmur64A(hash, sizeof(rcl_hash_t), HASH_SEED);
     }
   }
 
@@ -497,11 +520,11 @@ rcl_result rcl_query(rcl_t* db, rcl_query_t* query, uint64_t* result) {
       rcl_page_t* logs_page =
           vector_at(&(db->logs_pages), i / LOGS_PAGE_CAPACITY);
 
-      if (query->addresses.len > 0) {
+      if (query->address.len > 0) {
         rcl_cell_address_t address =
             file_as_addresses(&(logs_page->addresses))[offset];
 
-        if (!includes(address, addresses, query->addresses.len))
+        if (!includes(address, addresses, query->address.len))
           continue;
       }
 

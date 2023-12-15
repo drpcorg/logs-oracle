@@ -130,13 +130,24 @@ rcl_inline uint32_t xorshift32(void) {
   return randseed = x;
 }
 
-rcl_inline void hex2bin(uint8_t* b, const char* str, int bytes) {
+rcl_inline int hex2bin(uint8_t* b, const char* str, int bytes) {
+  size_t len = strlen(str);
+
+  if (len == bytes * 2 + 2 && str[0] == '0' &&
+      (str[1] == 'x' || str[1] == 'X')) {
+    str += 2;
+  } else if (len != bytes * 2) {
+    return -1;
+  }
+
   unsigned int tmp;
 
   for (int i = 0; i < bytes; ++i) {
     sscanf(str + i * 2, "%02X", &tmp);
     b[i] = (uint8_t)tmp;
   }
+
+  return 0;
 }
 
 #endif  // _RCL_COMMON_H

@@ -104,9 +104,9 @@ error:
 }
 
 int rcl_request_logs(const char* upstream,
-                            uint64_t from,
-                            uint64_t to,
-                            vector_t* logs) {
+                     uint64_t from,
+                     uint64_t to,
+                     vector_t* logs) {
   // load logs
   response_t response = {.size = 0, .buffer = NULL};
   if (rcl_fetch_logs(upstream, from, to, &response) != 0)
