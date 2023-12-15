@@ -1,35 +1,59 @@
-CFLAGS=-std=gnu11 -pthread -march=native -ffast-math -fvisibility=hidden \
-       -Wall -Wextra -Wpedantic -Wnull-dereference -Wvla -Wshadow \
-       -Wstrict-prototypes -Wwrite-strings -Wfloat-equal -Wconversion -Wdouble-promotion
+CFLAGS+=-std=gnu11 -pthread
+LDFLAGS+=
 
-CFLAGS+=$(shell pkg-config --cflags --libs libcurl jansson)
+CFLAGS+=$(shell pkg-config --cflags libcurl jansson)
+LDFLAGS+=$(shell pkg-config --libs libcurl jansson)
 
-# Find sources
+CWARN=-Wall -Wextra -Wpedantic -Wnull-dereference -Wvla -Wshadow\
+			-Wstrict-prototypes -Wwrite-strings -Wfloat-equal -Wconversion -Wdouble-promotion
+
+DEBUG=
+
+ifdef DEBUG
+	CFLAGS+=-O0 -g3 -DDEBUG
+else
+	CFLAGS+=-O3
+endif
+
+ifdef ASAN
+	CFLAGS+=-fsanitize=address
+	LDFLAGS+=-fsanitize=address
+endif
+ifdef MSAN
+	CFLAGS+=-fsanitize=memory
+	LDFLAGS+=-fsanitize=memory
+endif
+ifdef UBSAN
+	CFLAGS+=-fsanitize=undefined
+	LDFLAGS+=-fsanitize=undefined
+endif
+
+# C shared lib
 ALL=$(wildcard *.c *.h)
 
 HDR=$(filter %.h, $(ALL))
 SRC=$(filter %.c, $(ALL))
 
-liboracle.so: CFLAGS+=-O3 -fPIC
+liboracle.so: CFLAGS+=-fPIC -fvisibility=hidden -ffast-math $(CWARN)
 liboracle.so: $(SRC) $(HDR)
-	$(CC) $(CFLAGS) -shared -o $@ $(SRC)
+	$(CC) $(CFLAGS) $(LDFLAGS) -shared -o $@ $(SRC)
 
 # Unit tests
 .PHONY: libtest
 
 TESTS=$(wildcard test/*_test.c)
 
-# -fsanitize=address,undefined
-libtest: CFLAGS+=-std=gnu2x -O0 -g3
+libtest: CFLAGS+=$(shell pkg-config --cflags criterion) -std=gnu2x $(CWAR)
+libtest: LDFLAGS+=$(shell pkg-config --libs criterion) 
 libtest: $(SRC) $(HDR) $(TESTS)
-	$(CC) $(CFLAGS) $(shell pkg-config --cflags --libs criterion) -o $@ $(SRC) $(TESTS)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(SRC) $(TESTS)
 	./$@
 
 # Doracle (go wrapper server)
 .PHONY: doracle-build doracle-dev
 
-doracle-dev: export CGO_CFLAGS=-fsanitize=address -O0 -g
-doracle-dev: export CGO_LDFLAGS=-fsanitize=address 
+doracle-dev: export CGO_CFLAGS=$(CFLAGS)
+doracle-dev: export CGO_LDFLAGS=$(LDFLAGS)
 doracle-build:
 	cd doracle && go build -gcflags "all=-N -l" .
 

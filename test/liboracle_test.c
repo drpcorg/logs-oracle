@@ -142,8 +142,8 @@ rcl_t* db_make_filled(void) {
       ml(6, addresses[4], topics[9], topics[8], NULL, NULL),
   };
 
-  int err = rcl_insert(db, sizeof(s) / sizeof(s[0]), s);
-  cr_expect(err == 0, "Expected sucessfull insert");
+  rcl_result err = rcl_insert(db, sizeof(s) / sizeof(s[0]), s);
+  cr_expect(err == RCL_SUCCESS, "Expected sucessfull insert");
 
   uint64_t blocks;
   rcl_result result = rcl_blocks_count(db, &blocks);
@@ -240,8 +240,8 @@ Test(liboracle, EmptyInsert) {
   rcl_t* db = db_make();
   cr_assert(db != NULL, "Expected db connection is a NULL");
 
-  int err = rcl_insert(db, 0, NULL);
-  cr_expect(err == 0, "Expected sucessfull insert");
+  rcl_result err = rcl_insert(db, 0, NULL);
+  cr_expect(err == RCL_SUCCESS, "Expected sucessfull insert");
 
   uint64_t blocks;
   rcl_result r = rcl_blocks_count(db, &blocks);

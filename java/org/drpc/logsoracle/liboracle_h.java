@@ -51,19 +51,19 @@ public class liboracle_h  {
     }
     /**
      * {@snippet :
-     * enum .RCL_ERROR_MEMORY_ALLOCATION = 1;
+     * enum .RCL_ERROR_MEMORY_ALLOCATION = 3;
      * }
      */
     public static int RCL_ERROR_MEMORY_ALLOCATION() {
-        return (int)1L;
+        return (int)3L;
     }
     /**
      * {@snippet :
-     * enum .RCL_ERROR_UNKNOWN = 2;
+     * enum .RCL_ERROR_UNKNOWN = 5;
      * }
      */
     public static int RCL_ERROR_UNKNOWN() {
-        return (int)2L;
+        return (int)5L;
     }
     public static MethodHandle rcl_open$MH() {
         return RuntimeHelper.requireNonNull(constants$0.rcl_open$MH,"rcl_open");

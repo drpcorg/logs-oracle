@@ -7,16 +7,22 @@ jobs:
   build-macos-dylib:
     name:  Build dylib for macos
     runs-on: macos-latest
+    env: { CC: "clang" }
     steps:
     - uses: actions/checkout@v3
-    - run: brew install llvm@15
+    - run: |
+        brew install llvm@15
+        brew fetch --force --arch=arm curl jansson
+        brew fetch --force --arch=intel curl jansson
 
     - run: |
-        make CC="clang" CFLAGS="-arch x86_64" -j $(nproc) liboracle.so 
-        mv liboracle.so liboracle-x86_64-macos.dylib
-    - run: |
-        make CC="clang" CFLAGS="-arch arm64" -j $(nproc) liboracle.so 
+        brew reinstall $(brew --cache --arch=arm curl jansson)
+        make CFLAGS="-arch arm64" -j $(nproc) liboracle.so 
         mv liboracle.so liboracle-arm64-macos.dylib
+    - run: |
+        brew reinstall $(brew --cache --arch=intel curl jansson)
+        make CFLAGS="-arch x86_64" -j $(nproc) liboracle.so 
+        mv liboracle.so liboracle-x86_64-macos.dylib
 
     - uses: actions/upload-artifact@v3
       with:
@@ -26,12 +32,17 @@ jobs:
   build-linux-so:
     name:  Build dylib for linux
     runs-on: ubuntu-latest
+    env: { CC: "clang" }
     steps:
     - uses: actions/checkout@v3
-    - run: sudo apt-get install gcc-12
+    - run: |
+        sudo apt-get update
+        sudo apt-get install -y clang-12 libjansson-dev libcurl4-openssl-dev
+
     - run: |
         make -j $(nproc) liboracle.so 
         mv liboracle.so liboracle-x86_64-linux.so
+
     - uses: actions/upload-artifact@v3
       with:
         name: liboracle-linux

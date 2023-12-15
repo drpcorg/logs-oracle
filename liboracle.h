@@ -4,12 +4,8 @@
 #include <math.h>
 #include <stdint.h>
 
-#include "bloom.h"
 #include "common.h"
-#include "file.h"
-#include "vector.h"
-
-enum { HASH_LENGTH = 32, ADDRESS_LENGTH = 20, TOPICS_LENGTH = 4 };
+#include "loader.h"
 
 typedef enum {
   RCL_SUCCESS = 0,
@@ -23,15 +19,6 @@ typedef enum {
   RCL_ERROR_FS_IO,
   RCL_ERROR_UNKNOWN,
 } rcl_result;
-
-typedef uint8_t rcl_hash_t[HASH_LENGTH];        // __attribute__((aligned(8)));
-typedef uint8_t rcl_address_t[ADDRESS_LENGTH];  // __attribute__((aligned(8)));
-
-typedef struct {
-  uint64_t block_number;
-  rcl_address_t address;
-  rcl_hash_t topics[TOPICS_LENGTH];
-} rcl_log_t;
 
 typedef struct {
   uint64_t from_block, to_block;
