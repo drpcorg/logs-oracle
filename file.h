@@ -9,7 +9,7 @@ typedef struct {
   void* buffer;
 } file_t;
 
-#define RCL_FILE_SIZE_RESERVE (2ul << 36) // 128GB addresses per file
+#define RCL_FILE_SIZE_RESERVE (2ul << 36)  // 128GB addresses per file
 
 int file_open(file_t* f, const char* filename, uint64_t init_size);
 int file_close(file_t* f);

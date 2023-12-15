@@ -12,8 +12,8 @@ import static java.lang.foreign.ValueLayout.*;
  * struct {
  *     uint64_t from_block;
  *     uint64_t to_block;
- *     struct  addresses;
- *     struct  topics[4];
+ *     struct rcl_query_address address;
+ *     struct rcl_query_topics topics[4];
  * };
  * }
  */
@@ -25,11 +25,11 @@ public class rcl_query_t {
         MemoryLayout.structLayout(
             Constants$root.C_LONG_LONG$LAYOUT.withName("len"),
             Constants$root.C_POINTER$LAYOUT.withName("data")
-        ).withName("addresses"),
+        ).withName("address"),
         MemoryLayout.sequenceLayout(4, MemoryLayout.structLayout(
             Constants$root.C_LONG_LONG$LAYOUT.withName("len"),
             Constants$root.C_POINTER$LAYOUT.withName("data")
-        )).withName("topics")
+        ).withName("rcl_query_topics")).withName("topics")
     );
     public static MemoryLayout $LAYOUT() {
         return rcl_query_t.$struct$LAYOUT;
@@ -90,90 +90,7 @@ public class rcl_query_t {
     public static void to_block$set(MemorySegment seg, long index, long x) {
         rcl_query_t.to_block$VH.set(seg.asSlice(index*sizeof()), x);
     }
-    /**
-     * {@snippet :
-     * struct {
-     *     size_t len;
-     *     rcl_address_t* data;
-     * };
-     * }
-     */
-    public static final class addresses {
-
-        // Suppresses default constructor, ensuring non-instantiability.
-        private addresses() {}
-        static final StructLayout addresses$struct$LAYOUT = MemoryLayout.structLayout(
-            Constants$root.C_LONG_LONG$LAYOUT.withName("len"),
-            Constants$root.C_POINTER$LAYOUT.withName("data")
-        );
-        public static MemoryLayout $LAYOUT() {
-            return addresses.addresses$struct$LAYOUT;
-        }
-        static final VarHandle len$VH = addresses$struct$LAYOUT.varHandle(MemoryLayout.PathElement.groupElement("len"));
-        public static VarHandle len$VH() {
-            return addresses.len$VH;
-        }
-        /**
-         * Getter for field:
-         * {@snippet :
-         * size_t len;
-         * }
-         */
-        public static long len$get(MemorySegment seg) {
-            return (long)addresses.len$VH.get(seg);
-        }
-        /**
-         * Setter for field:
-         * {@snippet :
-         * size_t len;
-         * }
-         */
-        public static void len$set(MemorySegment seg, long x) {
-            addresses.len$VH.set(seg, x);
-        }
-        public static long len$get(MemorySegment seg, long index) {
-            return (long)addresses.len$VH.get(seg.asSlice(index*sizeof()));
-        }
-        public static void len$set(MemorySegment seg, long index, long x) {
-            addresses.len$VH.set(seg.asSlice(index*sizeof()), x);
-        }
-        static final VarHandle data$VH = addresses$struct$LAYOUT.varHandle(MemoryLayout.PathElement.groupElement("data"));
-        public static VarHandle data$VH() {
-            return addresses.data$VH;
-        }
-        /**
-         * Getter for field:
-         * {@snippet :
-         * rcl_address_t* data;
-         * }
-         */
-        public static MemorySegment data$get(MemorySegment seg) {
-            return (java.lang.foreign.MemorySegment)addresses.data$VH.get(seg);
-        }
-        /**
-         * Setter for field:
-         * {@snippet :
-         * rcl_address_t* data;
-         * }
-         */
-        public static void data$set(MemorySegment seg, MemorySegment x) {
-            addresses.data$VH.set(seg, x);
-        }
-        public static MemorySegment data$get(MemorySegment seg, long index) {
-            return (java.lang.foreign.MemorySegment)addresses.data$VH.get(seg.asSlice(index*sizeof()));
-        }
-        public static void data$set(MemorySegment seg, long index, MemorySegment x) {
-            addresses.data$VH.set(seg.asSlice(index*sizeof()), x);
-        }
-        public static long sizeof() { return $LAYOUT().byteSize(); }
-        public static MemorySegment allocate(SegmentAllocator allocator) { return allocator.allocate($LAYOUT()); }
-        public static MemorySegment allocateArray(long len, SegmentAllocator allocator) {
-            return allocator.allocate(MemoryLayout.sequenceLayout(len, $LAYOUT()));
-        }
-        public static MemorySegment ofAddress(MemorySegment addr, SegmentScope scope) { return RuntimeHelper.asArray(addr, $LAYOUT(), 1, scope); }
-    }
-
-    public static MemorySegment addresses$slice(MemorySegment seg) {
+    public static MemorySegment address$slice(MemorySegment seg) {
         return seg.asSlice(16, 16);
     }
     public static MemorySegment topics$slice(MemorySegment seg) {

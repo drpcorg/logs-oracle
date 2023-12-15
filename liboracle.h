@@ -20,18 +20,20 @@ typedef enum {
   RCL_ERROR_UNKNOWN,
 } rcl_result;
 
+struct rcl_query_address {
+  size_t len;
+  const char** data;
+};
+
+struct rcl_query_topics {
+  size_t len;
+  const char** data;
+};
+
 typedef struct {
   uint64_t from_block, to_block;
-
-  struct {
-    size_t len;
-    rcl_address_t* data;
-  } addresses;
-
-  struct {
-    size_t len;
-    rcl_hash_t* data;
-  } topics[TOPICS_LENGTH];
+  struct rcl_query_address address;
+  struct rcl_query_topics topics[TOPICS_LENGTH];
 } rcl_query_t;
 
 struct db;

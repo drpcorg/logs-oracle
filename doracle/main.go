@@ -12,7 +12,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/labstack/echo-contrib/echoprometheus"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
@@ -298,14 +297,14 @@ func (raw *Filter) ToQuery(node *Node) (*liboracle.Query, error) {
 		case []interface{}:
 			for i, addr := range r {
 				if str, ok := addr.(string); ok {
-					q.Addresses = append(q.Addresses, liboracle.Address(common.HexToAddress(str)))
+					q.Addresses = append(q.Addresses, str)
 				} else {
 					return nil, fmt.Errorf("non-string address at index %d", i)
 				}
 			}
 
 		case string:
-			q.Addresses = append(q.Addresses, liboracle.Address(common.HexToAddress(r)))
+			q.Addresses = append(q.Addresses, r)
 
 		default:
 			return nil, fmt.Errorf("invalid addresses in query")
@@ -318,14 +317,14 @@ func (raw *Filter) ToQuery(node *Node) (*liboracle.Query, error) {
 			return nil, fmt.Errorf("allowed only 4 topic filters")
 		}
 
-		q.Topics = make([][]liboracle.Hash, len(raw.Topics))
+		q.Topics = make([][]string, len(raw.Topics))
 
 		for i, t := range raw.Topics {
 			switch topic := t.(type) {
 			case nil:
 
 			case string:
-				q.Topics[i] = append(q.Topics[i], liboracle.Hash(common.HexToHash(topic)))
+				q.Topics[i] = append(q.Topics[i], topic)
 
 			case []interface{}:
 				// or case e.g. [null, "topic0", "topic1"]
@@ -336,7 +335,7 @@ func (raw *Filter) ToQuery(node *Node) (*liboracle.Query, error) {
 					}
 
 					if topic, ok := rawTopic.(string); ok {
-						q.Topics[i] = append(q.Topics[i], liboracle.Hash(common.HexToHash(topic)))
+						q.Topics[i] = append(q.Topics[i], topic)
 					} else {
 						return nil, fmt.Errorf("invalid topic(s)")
 					}

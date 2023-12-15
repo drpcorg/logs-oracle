@@ -161,7 +161,7 @@ uint64_t db_make_query(rcl_t* db,
   rcl_query_t q = {
       .from_block = from,
       .to_block = to,
-      .addresses = {.len = 0, .data = NULL},
+      .address = {.len = 0, .data = NULL},
       .topics = {{.len = 0, .data = NULL},
                  {.len = 0, .data = NULL},
                  {.len = 0, .data = NULL},
@@ -169,12 +169,12 @@ uint64_t db_make_query(rcl_t* db,
   };
 
   if (ad.size) {
-    q.addresses.len = ad.size;
-    q.addresses.data = malloc(sizeof(rcl_address_t) * ad.size);
+    q.address.len = ad.size;
+    q.address.data = malloc(sizeof(rcl_address_t) * ad.size);
 
     for (size_t i = 0; i < ad.size; ++i) {
       size_t k = *(uint64_t*)vector_at(&ad, i);
-      hex2bin(q.addresses.data[i], addresses[k], sizeof(q.addresses.data[i]));
+      q.address.data[i] = addresses[k];
     }
   }
 
@@ -187,7 +187,7 @@ uint64_t db_make_query(rcl_t* db,
 
     for (size_t j = 0; j < tpcs[i].size; ++j) {
       uint64_t k = *(uint64_t*)vector_at(&tpcs[i], j);
-      hex2bin(q.topics[i].data[j], topics[k], sizeof(q.topics[i].data[j]));
+      q.topics[i].data[j] = topics[k];
     }
   }
 
@@ -198,7 +198,7 @@ uint64_t db_make_query(rcl_t* db,
 
   // Clenup
   if (ad.size)
-    free(q.addresses.data);
+    free(q.address.data);
 
   for (size_t i = 0; i < TOPICS_LENGTH; ++i) {
     if (q.topics[i].data != NULL)
@@ -212,11 +212,10 @@ uint64_t db_make_query(rcl_t* db,
   return actual;
 }
 
-#define expect_query(expected, from, to, addresses, t1, t2, t3, t4)       \
-  do {                                                                    \
-    vector_t tpcs[TOPICS_LENGTH] = {t1, t2, t3, t4};                      \
-    cr_expect(                                                            \
-        eq(u64, expected, db_make_query(db, from, to, addresses, tpcs))); \
+#define expect_query(expected, from, to, address, t1, t2, t3, t4)             \
+  do {                                                                        \
+    vector_t tpcs[TOPICS_LENGTH] = {t1, t2, t3, t4};                          \
+    cr_expect(eq(u64, expected, db_make_query(db, from, to, address, tpcs))); \
   } while (0);
 
 // Tests
@@ -254,7 +253,7 @@ Test(liboracle, QueryFullScan) {
   rcl_t* db = db_make_filled();
   expect_query(/* expected */ 20,
                /* from, to */ 0, 6,
-               /* addresses */ v(),
+               /* address */ v(),
                /* topics */ v(), v(), v(), v());
   rcl_free(db);
 }
@@ -263,7 +262,7 @@ Test(liboracle, QuerySegmentTooLarge) {
   rcl_t* db = db_make_filled();
   expect_query(/* expected */ 20,
                /* from, to */ 0, 42,
-               /* addresses */ v(),
+               /* address */ v(),
                /* topics */ v(), v(), v(), v());
   rcl_free(db);
 }
@@ -272,11 +271,11 @@ Test(liboracle, QueryOneBlock) {
   rcl_t* db = db_make_filled();
   expect_query(/* expected */ 1,
                /* from, to */ 6, 6,
-               /* addresses */ v(),
+               /* address */ v(),
                /* topics */ v(), v(), v(), v());
   expect_query(/* expected */ 7,
                /* from, to */ 5, 5,
-               /* addresses */ v(),
+               /* address */ v(),
                /* topics */ v(), v(), v(), v());
   rcl_free(db);
 }
@@ -285,7 +284,7 @@ Test(liboracle, QuerySegment) {
   rcl_t* db = db_make_filled();
   expect_query(/* expected */ 9,
                /* from, to */ 2, 4,
-               /* addresses */ v(),
+               /* address */ v(),
                /* topics */ v(), v(), v(), v());
   rcl_free(db);
 }
@@ -294,11 +293,11 @@ Test(liboracle, QueryAddress) {
   rcl_t* db = db_make_filled();
   expect_query(/* expected */ 2,
                /* from, to */ 0, 6,
-               /* addresses */ v(4),
+               /* address */ v(4),
                /* topics */ v(), v(), v(), v());
   expect_query(/* expected */ 3,
                /* from, to */ 0, 6,
-               /* addresses */ v(3, 4),
+               /* address */ v(3, 4),
                /* topics */ v(), v(), v(), v());
   rcl_free(db);
 }
@@ -307,7 +306,7 @@ Test(liboracle, QueryTopics) {
   rcl_t* db = db_make_filled();
   expect_query(/* expected */ 2,
                /* from, to */ 0, 6,
-               /* addresses */ v(),
+               /* address */ v(),
                /* topics */ v(), v(), v(3), v());
   rcl_free(db);
 }

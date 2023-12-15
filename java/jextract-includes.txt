@@ -9,6 +9,10 @@
 --include-constant RCL_ERROR_UNKNOWN            # header: liboracle.h
 
 --include-struct db                 # header: liboracle.h
+--include-struct rcl_address        # header: liboracle.h
+--include-struct rcl_hash           # header: liboracle.h
+--include-struct rcl_query_address  # header: liboracle.h
+--include-struct rcl_query_topics   # header: liboracle.h
 
 --include-typedef rcl_t             # header: liboracle.h
 --include-typedef rcl_address_t     # header: liboracle.h
