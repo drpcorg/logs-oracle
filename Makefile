@@ -10,7 +10,7 @@ CWARN=-Wall -Wextra -Wpedantic -Wnull-dereference -Wvla -Wshadow\
 DEBUG=
 
 ifdef DEBUG
-	CFLAGS+=-O0 -g3 -DDEBUG
+	CFLAGS+=-O0 -g3 -DDEBUG -DNDEBUG
 else
 	CFLAGS+=-O3
 endif
@@ -84,7 +84,7 @@ java-example: liboracle.so java/LogsOracle.jar
 
 clean:
 	find -type f -regex '.*\.\(o\|d\|a\|so\|class\)' -exec rm -f {} \;
-	rm -f doracle/doracle
+	rm -f doracle/doracle libtest java/LogsOracle.jar
 
 format:
 	go fmt ./...

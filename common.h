@@ -45,6 +45,24 @@
 #define rcl_memcpy(dst, src, length) (void)memcpy(dst, src, (size_t)(length))
 #define rcl_memmove(dst, src, length) (void)memmove(dst, src, (size_t)(length))
 
+#ifdef DEBUG
+#define rcl_debug(...)                                   \
+  do {                                                   \
+    fprintf(stderr, "DBG [" __FILE__ "]: " __VA_ARGS__); \
+    fflush(stderr);                                      \
+  } while (false)
+#else
+#define rcl_debug(...) \
+  do {                 \
+  } while (false)
+#endif
+
+#define rcl_error(...)                                   \
+  do {                                                   \
+    fprintf(stderr, "ERR [" __FILE__ "]: " __VA_ARGS__); \
+    fflush(stderr);                                      \
+  } while (false)
+
 // Section: Utils
 enum { MAX_FILE_LENGTH = 256 };
 typedef char rcl_filename_t[MAX_FILE_LENGTH + 1];

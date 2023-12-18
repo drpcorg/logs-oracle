@@ -3,7 +3,7 @@
 
 bool vector_init(vector_t* v, uint64_t capacity, uint64_t item_size) {
   if (capacity > 0) {
-    v->buffer = malloc(item_size * capacity);
+    v->buffer = calloc(capacity, item_size);
     if (rcl_unlikely(v->buffer == NULL)) {
       return false;
     }
@@ -33,7 +33,7 @@ void* vector_add(vector_t* v) {
       new_capacity = old_capacity + old_capacity / 2;
     }
 
-    void* buffer = malloc(new_capacity * v->item_size);
+    void* buffer = calloc(new_capacity, v->item_size);
     if (rcl_unlikely(buffer == NULL)) {
       return NULL;
     }

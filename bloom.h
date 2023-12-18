@@ -8,6 +8,8 @@ enum { LOGS_BLOOM_SIZE = 256 };
 
 typedef uint8_t bloom_t[LOGS_BLOOM_SIZE];
 
+#define bloom_init(bloom) memset(bloom, 0, sizeof(bloom_t));
+
 void bloom_add(bloom_t* bloom, uint8_t* hash);
 bool bloom_check(bloom_t* bloom, uint8_t* hash);
 

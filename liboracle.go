@@ -97,14 +97,14 @@ func (conn *Conn) Query(query *Query) (uint64, error) {
 	if len(query.Addresses) > 0 {
 		tmp := make([](*C.char), len(query.Addresses))
 		for i := 0; i < len(query.Addresses); i++ {
-			tmp[i] = C.CString(query.Addresses[i]);
+			tmp[i] = C.CString(query.Addresses[i])
 		}
 
 		defer func() {
 			for i := 0; i < len(query.Addresses); i++ {
-				C.free(unsafe.Pointer(tmp[i]));
+				C.free(unsafe.Pointer(tmp[i]))
 			}
-		}();
+		}()
 
 		ptr := &tmp
 		pinner.Pin(ptr)
@@ -123,14 +123,14 @@ func (conn *Conn) Query(query *Query) (uint64, error) {
 		if len(query.Topics) > i && len(query.Topics[i]) > 0 {
 			tmp := make([](*C.char), len(query.Topics[i]))
 			for j := 0; j < len(query.Topics[j]); j++ {
-				tmp[j] = C.CString(query.Topics[j][j]);
+				tmp[j] = C.CString(query.Topics[j][j])
 			}
 
 			defer func() {
 				for j := 0; j < len(query.Topics[i]); j++ {
-					C.free(unsafe.Pointer(tmp[j]));
+					C.free(unsafe.Pointer(tmp[j]))
 				}
-			}();
+			}()
 
 			ptr := &tmp
 			pinner.Pin(ptr)

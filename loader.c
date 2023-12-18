@@ -1,4 +1,5 @@
 #include "loader.h"
+#include "common.h"
 
 static void rcl_crawler_format_request(char* buffer,
                                        size_t buffer_size,
@@ -19,7 +20,7 @@ static void rcl_crawler_format_request(char* buffer,
 
 typedef struct {
   char* buffer;
-  size_t size;
+  int size;
 } response_t;
 
 static size_t response_onsend_callback(void* contents,
@@ -31,13 +32,13 @@ static size_t response_onsend_callback(void* contents,
   size_t chunksize = size * nmemb;
   size_t datasize = response->size + chunksize + 1;
   if (datasize > MAX_RESPONSE_SIZE) {
-    fprintf(stderr, "liboracle: too big response\n");
+    rcl_error("response_onsend_callback; too big response\n");
     return 0;
   }
 
   response->buffer = realloc(response->buffer, response->size + chunksize + 1);
   if (!response->buffer) {
-    fprintf(stderr, "liboracle: not enough memory\n");
+    rcl_error("response_onsend_callback; not enough memory\n");
     return 0;
   }
 
@@ -74,16 +75,16 @@ static int rcl_fetch_logs(const char* upstream,
 
   CURLcode res = curl_easy_perform(handle);
   if (res != CURLE_OK) {
-    fprintf(stderr, "curl_easy_perform() failed: %s\n",
-            curl_easy_strerror(res));
+    rcl_error("rcl_fetch_logs; curl_easy_perform() failed: %s\n",
+              curl_easy_strerror(res));
     goto error;
   }
 
   uint64_t response_code = 0;
   curl_easy_getinfo(handle, CURLINFO_RESPONSE_CODE, &response_code);
   if (response_code != 200) {
-    fprintf(stderr, "liboracle: server responded with code %ld\n",
-            response_code);
+    rcl_error("rcl_fetch_logs; server responded with code %ld\n",
+              response_code);
     goto error;
   }
 
@@ -107,18 +108,24 @@ int rcl_request_logs(const char* upstream,
                      uint64_t from,
                      uint64_t to,
                      vector_t* logs) {
+  rcl_debug("rcl_request_logs; start; %zu, to: %zu\n", from, to);
+
   // load logs
   response_t response = {.size = 0, .buffer = NULL};
   if (rcl_fetch_logs(upstream, from, to, &response) != 0)
     goto error;
+
+  rcl_debug("rcl_request_logs: successfully loaded\n");
 
   // parse logs
   json_error_t load_error;
   json_t* root = json_loads(response.buffer, 0, &load_error);
 
   if (!root) {
-    fprintf(stderr, "liboracle: error parse response: %s\n", load_error.text);
-    printf("response: %s\n", response.buffer);
+    rcl_error(
+        "rcl_request_logs: couldn't parse response; error: %s, response: "
+        "%.*s\n",
+        load_error.text, response.size, response.buffer);
     goto error;
   }
   free(response.buffer);
@@ -126,29 +133,29 @@ int rcl_request_logs(const char* upstream,
   response.buffer = NULL;
 
   if (!json_is_object(root)) {
-    fprintf(stderr, "liboracle: root is not an object\n");
-    return 1;
+    rcl_error("rcl_request_logs; root is not an object\n");
+    goto error;
   }
 
   json_t* rid = json_object_get(root, "id");
   if (!json_is_integer(rid)) {
-    fprintf(stderr, "liboracle: id is not an integer\n");
+    rcl_error("rcl_request_logs; 'id' is not an integer\n");
     goto error;
   }
 
   json_t* error = json_object_get(root, "error");
   if (error != NULL) {
     if (json_is_string(error)) {
-      fprintf(stderr, "liboracle: RPC error: %s", json_string_value(error));
+      rcl_error("rcl_request_logs; RPC error: %s\n", json_string_value(error));
     } else if (json_is_object(error)) {
       json_t* msg = json_object_get(error, "message");
       json_t* code = json_object_get(error, "code");
 
-      fprintf(stderr, "liboracle: RPC error: [message] %s, [code] %lld",
-              (json_is_string(msg) ? json_string_value(msg) : "unrecognized"),
-              (json_is_integer(code) ? json_integer_value(code) : -1));
+      rcl_error("rcl_request_logs; RPC error: [message] %s, [code] %lld\n",
+                (json_is_string(msg) ? json_string_value(msg) : "unrecognized"),
+                (json_is_integer(code) ? json_integer_value(code) : -1));
     } else {
-      fprintf(stderr, "liboracle: RPC error: unrecognized");
+      rcl_error("rcl_request_logs; RPC error: unrecognized\n");
     }
 
     goto error;
@@ -156,14 +163,14 @@ int rcl_request_logs(const char* upstream,
 
   json_t* result = json_object_get(root, "result");
   if (!json_is_array(result)) {
-    fprintf(stderr, "liboracle: result is not an array\n");
+    rcl_error("rcl_request_logs; result is not an array\n");
     goto error;
   }
 
   for (size_t i = 0, n = json_array_size(result); i < n; ++i) {
     json_t* item = json_array_get(result, i);
     if (!json_is_object(item)) {
-      fprintf(stderr, "liboracle: %zu item is not object\n", i);
+      rcl_error("rcl_request_logs; %zu item is not object\n", i);
       goto error;
     }
 
@@ -178,11 +185,12 @@ int rcl_request_logs(const char* upstream,
 
       log->block_number = (uint64_t)strtoll(start, &end, 16);
       if (errno == ERANGE) {
-        fprintf(stderr, "liboracle: %zu item, block_number range error\n", i);
+        rcl_error("rcl_request_logs; %zu item, block_number range error\n", i);
         goto error;
       }
     } else {
-      fprintf(stderr, "liboracle: %zu item, block_number is not a string\n", i);
+      rcl_error("rcl_request_logs; %zu item, block_number is not a string\n",
+                i);
       goto error;
     }
 
@@ -190,7 +198,7 @@ int rcl_request_logs(const char* upstream,
     if (json_is_string(address)) {
       hex2bin(log->address, json_string_value(address), sizeof(rcl_address_t));
     } else {
-      fprintf(stderr, "liboracle: %zu item, address is not a string\n", i);
+      rcl_error("rcl_request_logs; %zu item, address is not a string\n", i);
       goto error;
     }
 
@@ -198,7 +206,7 @@ int rcl_request_logs(const char* upstream,
     if (json_is_array(topics)) {
       size_t topics_size = json_array_size(topics);
       if (topics_size > TOPICS_LENGTH) {
-        fprintf(stderr, "liboracle: %zu item, too many topics\n", i);
+        fprintf(stderr, "rcl_request_logs; %zu item, too many topics\n", i);
         goto error;
       }
 
@@ -208,7 +216,8 @@ int rcl_request_logs(const char* upstream,
         if (j < topics_size) {
           json_t* topic = json_array_get(topics, j);
           if (!json_is_string(topic)) {
-            fprintf(stderr, "liboracle: %zu item, %zu topic is not a string\n",
+            fprintf(stderr,
+                    "rcl_request_logs; %zu item, %zu topic is not a string\n",
                     i, j);
             goto error;
           }
@@ -217,10 +226,12 @@ int rcl_request_logs(const char* upstream,
         }
       }
     } else {
-      fprintf(stderr, "liboracle: %zu item, topics is not an array\n", i);
+      rcl_error("rcl_request_logs; %zu item, topics is not an array\n", i);
       goto error;
     }
   }
+
+  rcl_debug("rcl_request_logs: successfully parsed\n");
 
   json_decref(root);
 

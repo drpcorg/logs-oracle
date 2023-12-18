@@ -21,7 +21,7 @@ void vector_remove(vector_t* vector, void* item);
 
 #define vector_last(vector) vector_at((vector), (vector)->size - 1)
 
-#define vector_reset(vector) (vector)->size = 0;
+#define vector_reset(vector) (vector)->size = 0
 
 #define vector_is_empty(vector) ((vector)->size == 0)
 
