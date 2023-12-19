@@ -1,4 +1,5 @@
 import java.io.File;
+import java.util.Collections;
 import org.drpc.logsoracle.*;
 
 class Example {
@@ -9,7 +10,9 @@ class Example {
         }
 
         try (LogsOracle db = new LogsOracle(dir.getCanonicalPath(), 0L)) {
+            System.out.println(db.GetLogsCount());
             System.out.println(db.GetBlocksCount());
+            System.out.println(db.Query(0L, 16L, Collections.emptyList(), Collections.emptyList()));
         }
     }
 }
