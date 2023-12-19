@@ -1,12 +1,13 @@
 #include "liboracle.h"
 
-#include "bloom.h"
+#include <stdint.h>
+#include <stdlib.h>
 #include "common.h"
 #include "file.h"
 #include "loader.h"
 #include "vector.h"
 
-#define UPSTREAM_LIMIT 4096
+enum { RCL_QUERY_SIZE_LIMIT = 4 * 1024 * 1024 }; // 4MB RAM for query
 
 static uint64_t LOGS_PAGE_CAPACITY = 1000000;   // 1m
 static uint64_t BLOCKS_FILE_CAPACITY = 100000;  // 100k
@@ -76,10 +77,10 @@ typedef struct {
 } rcl_page_t;
 
 #define file_as_blocks(p) ((rcl_block_t*)((p)->buffer))
-#define file_as_addresses(p) ((rcl_cell_address_t*)((p)->buffer))
-#define file_as_topics(p) ((rcl_cell_topics_t*)((p)->buffer))
+#define file_as_addresses(p) ((rcl_cell_address_t*)((p).buffer))
+#define file_as_topics(p) ((rcl_cell_topics_t*)((p).buffer))
 
-static int rcl_page_filename(rcl_filename_t filename,
+static int rcl_page_filename(rcl_filepath_t filename,
                              const char* dirname,
                              uint64_t index,
                              char part) {
@@ -106,7 +107,7 @@ struct db {
 
   // Config
   uint64_t ram_limit;
-  rcl_filename_t dir;
+  rcl_filepath_t dir;
 
   bool closed;
   char* upstream;
@@ -122,7 +123,7 @@ struct db {
 };
 
 static int rcl_open_blocks_page(rcl_t* db) {
-  rcl_filename_t filename = {0};
+  rcl_filepath_t filename = {0};
 
   int status = rcl_page_filename(filename, db->dir, db->blocks_pages.size, 'b');
   if (rcl_unlikely(status != 0)) {
@@ -149,7 +150,7 @@ static int rcl_open_data_page(rcl_t* db) {
   rcl_page_t* page = (rcl_page_t*)vector_add(&(db->data_pages));
   page->index = index;
 
-  rcl_filename_t addresses_file = {0}, topics_file = {0};
+  rcl_filepath_t addresses_file = {0}, topics_file = {0};
 
   if ((rcl_page_filename(addresses_file, db->dir, index, 'a') != 0) ||
       (rcl_page_filename(topics_file, db->dir, index, 't') != 0)) {
@@ -231,8 +232,8 @@ static rcl_result rcl_state_read(rcl_t* t) {
   if (err != 0)
     return RCL_ERROR_FS_IO;
 
-  int count = fscanf(t->manifest, "%" PRIu64 " %" PRIu64 " %" PRIu64 "", &t->height, &t->blocks_count,
-                     &t->logs_count);
+  int count = fscanf(t->manifest, "%" PRIu64 " %" PRIu64 " %" PRIu64 "",
+                     &t->height, &t->blocks_count, &t->logs_count);
 
   if (count != 3)
     return RCL_ERROR_FS_IO;
@@ -244,8 +245,8 @@ static rcl_result rcl_state_write(rcl_t* t) {
   if (fseek(t->manifest, 0, SEEK_SET) != 0)
     return RCL_ERROR_FS_IO;
 
-  int bytes = fprintf(t->manifest, "%" PRIu64 " %" PRIu64 " %" PRIu64 "", t->height, t->blocks_count,
-                      t->logs_count);
+  int bytes = fprintf(t->manifest, "%" PRIu64 " %" PRIu64 " %" PRIu64 "",
+                      t->height, t->blocks_count, t->logs_count);
   if (bytes <= 0)
     return RCL_ERROR_FS_IO;
 
@@ -351,7 +352,7 @@ rcl_result rcl_open(char* dir, uint64_t ram_limit, rcl_t** db_ptr) {
   db->ram_limit = ram_limit;
   strncpy(db->dir, dir, MAX_FILE_LENGTH);
 
-  rcl_filename_t state_filename = {0};
+  rcl_filepath_t state_filename = {0};
   int count =
       snprintf(state_filename, MAX_FILE_LENGTH, "%s/%s", db->dir, "toc.txt");
   if (rcl_unlikely(count < 0 || count >= MAX_FILE_LENGTH)) {
@@ -456,54 +457,47 @@ rcl_result rcl_insert(rcl_t* db, size_t size, rcl_log_t* logs) {
 
   pthread_rwlock_wrlock(&(db->lock));
 
-  for (size_t i = 0; i < size; ++i) {
-    rcl_log_t* log = logs + i;
-
-    // store is immutable, operation not supported
-    if (db->blocks_count > log->block_number + 1) {
+  for (rcl_log_t *log = logs, *end = logs + size; log != end; ++log) {
+    if (rcl_unlikely(db->blocks_count > log->block_number + 1)) {
       result = RCL_ERROR_INSERT_LOGS_TO_OLD_BLOCK;
       break;
     }
 
-    // add new block
     if (log->block_number >= db->blocks_count) {
-      int err = rcl_add_block(db, log->block_number);
-      if (rcl_unlikely(err != 0)) {
+      if (rcl_add_block(db, log->block_number) != 0) {
         result = RCL_ERROR_UNKNOWN;
         break;
       }
     }
 
-    // add logs page
     uint64_t page, offset;
     get_position(db->logs_count, LOGS_PAGE_CAPACITY, &page, &offset);
 
     if (db->data_pages.size <= page) {
-      int err = rcl_open_data_page(db);
-      if (rcl_unlikely(err != 0)) {
+      if (rcl_open_data_page(db) != 0) {
         result = RCL_ERROR_UNKNOWN;
         break;
       }
     }
 
     // insert logs
-    rcl_block_t* current_block = rcl_get_block(db, log->block_number);
-    assert(current_block != NULL);
+    rcl_block_t* block = rcl_get_block(db, log->block_number);
+    assert(block != NULL);
 
     rcl_page_t* logs_page = vector_at(&(db->data_pages), page);
     assert(logs_page != NULL);
 
-    bloom_add(&(current_block->logs_bloom), log->address);
-    file_as_addresses(&(logs_page->addresses))[offset] =
+    bloom_add(&(block->logs_bloom), log->address);
+    file_as_addresses(logs_page->addresses)[offset] =
         murmur64A(log->address, sizeof(rcl_address_t), HASH_SEED);
 
     for (size_t j = 0; j < TOPICS_LENGTH; ++j) {
-      bloom_add(&(current_block->logs_bloom), log->topics[j]);
-      file_as_topics(&(logs_page->topics))[offset][j] =
+      bloom_add(&(block->logs_bloom), log->topics[j]);
+      file_as_topics(logs_page->topics)[offset][j] =
           murmur64A(log->topics[j], sizeof(rcl_hash_t), HASH_SEED);
     }
 
-    current_block->logs_count++;
+    block->logs_count++;
     db->logs_count++;
   }
 
@@ -515,115 +509,172 @@ rcl_result rcl_insert(rcl_t* db, size_t size, rcl_log_t* logs) {
   return result;
 }
 
+typedef struct {
+  uint64_t from, to, alen, tlen[TOPICS_LENGTH];
+  bool has_addresses, has_topics;
 
-rcl_result rcl_query(rcl_t* db, rcl_query_t* query, uint64_t* result) {
-  // TODO: use memory pool
-  // Prepare internal view
-  bool has_addresses = query->address.len > 0, has_topics = false;
+  struct {
+    rcl_address_t data;
+    uint64_t hash;
+  }* address;
+  struct {
+    rcl_hash_t data;
+    uint64_t hash;
+  }* topics[TOPICS_LENGTH];
+} rcl_iquery_t;
 
-  rcl_cell_address_t* addresses = NULL;
-  if (has_addresses) {
-    addresses = malloc(query->address.len * sizeof(rcl_cell_address_t));
+// Let's select the query as a single block and clear it the same way.
+// It is necessary to avoid memory fragmentation and also to limit the size of
+// the query.
+rcl_result rcl_make_iquery(rcl_query_t* query, rcl_iquery_t** result) {
+  int rc;
 
-    for (size_t i = 0; i < query->address.len; ++i) {
-      rcl_address_t address;
-      if (hex2bin(address, query->address.data[i], sizeof(rcl_address_t)) !=
-          0) {
-        return RCL_ERROR_UNKNOWN;
-      }
+  size_t bytes = sizeof(rcl_iquery_t);
+  for (size_t i = 0; i < query->address.len; ++i)
+    bytes += sizeof(rcl_address_t) + sizeof(uint64_t);
 
-      addresses[i] = murmur64A(address, sizeof(rcl_address_t), HASH_SEED);
+  for (size_t i = 0; i < TOPICS_LENGTH; ++i)
+    for (size_t j = 0; j < query->topics[i].len; ++j)
+      bytes += sizeof(rcl_hash_t) + sizeof(uint64_t);
+
+  if (bytes > RCL_QUERY_SIZE_LIMIT)
+    return RCL_ERROR_TOO_BIG_QUERY;
+
+  // markup
+  void* ptr = malloc(bytes);
+  if (ptr == NULL)
+    return RCL_ERROR_MEMORY_ALLOCATION;
+
+  rcl_iquery_t* iq = ptr;
+  ptr += sizeof(rcl_iquery_t);
+
+  iq->address = ptr;
+  ptr += sizeof(iq->address[0]) * query->address.len;
+
+  for (size_t i = 0; i < TOPICS_LENGTH; ++i) {
+    if (query->topics[i].len) {
+      iq->topics[i] = ptr;
+      ptr += sizeof(iq->topics[i][0]) * query->topics[i].len;
+    } else {
+      iq->topics[i] = NULL;
     }
   }
 
-  uint64_t* topics[TOPICS_LENGTH];
+  // fill
+  iq->from = query->from_block;
+  iq->to = query->to_block;
+  iq->has_addresses = query->address.len > 0;
+  iq->has_topics = false;
+  iq->alen = query->address.len;
+
+  for (size_t i = 0; i < query->address.len; ++i) {
+    rc = hex2bin(iq->address[i].data, query->address.data[i],
+                 sizeof(rcl_address_t));
+    if (rc != 0)
+      return RCL_ERROR_UNKNOWN;
+
+    iq->address[i].hash =
+        murmur64A(iq->address[i].data, sizeof(rcl_address_t), HASH_SEED);
+  }
+
   for (int i = 0; i < TOPICS_LENGTH; ++i) {
-    topics[i] = malloc(query->topics[i].len * sizeof(size_t));
+    iq->tlen[i] = query->topics[i].len;
+    if (query->topics[i].len > 0)
+      iq->has_topics = true;
 
     for (size_t j = 0; j < query->topics[i].len; ++j) {
-      has_topics = true;
-
-      rcl_hash_t hash;
-      if (hex2bin(hash, query->topics[i].data[j], sizeof(rcl_hash_t)) != 0) {
+      rc = hex2bin(iq->topics[i][j].data, query->topics[i].data[j],
+                   sizeof(rcl_hash_t));
+      if (rc != 0)
         return RCL_ERROR_UNKNOWN;
-      }
 
-      topics[i][j] = murmur64A(hash, sizeof(rcl_hash_t), HASH_SEED);
+      iq->topics[i][j].hash =
+          murmur64A(iq->topics[i][j].data, sizeof(rcl_hash_t), HASH_SEED);
     }
   }
 
-  // Get count
-  pthread_rwlock_rdlock(&(db->lock));
+  *result = iq;
 
-  if (db->blocks_count == 0) {
-    *result = 0;
+  return RCL_SUCCESS;
+}
 
-    pthread_rwlock_unlock(&(db->lock));
-    return RCL_SUCCESS;
+static bool rcl_query_check_data(rcl_t* db,
+                                 rcl_iquery_t* q,
+                                 size_t page,
+                                 size_t offset) {
+  size_t k;
+  bool match;
+
+  rcl_page_t* logs_page = vector_at(&(db->data_pages), page);
+
+  uint64_t address = file_as_addresses(logs_page->addresses)[offset];
+  uint64_t* topics = file_as_topics(logs_page->topics)[offset];
+
+  for (match = q->alen == 0, k = 0; !match && k < q->alen; ++k)
+    match = q->address[k].hash == address;
+
+  if (!match)
+    return false;
+
+  for (size_t i = 0; i < TOPICS_LENGTH; ++i) {
+    for (match = q->tlen[i] == 0, k = 0; !match && k < q->tlen[i]; ++k)
+      match = q->topics[i][k].hash == topics[i];
+
+    if (!match)
+      return false;
   }
 
-  uint64_t start = query->from_block, end = query->to_block;
-  if (end >= db->blocks_count) {
-    end = db->blocks_count - 1;
-  }
+  return true;
+}
 
+rcl_result rcl_query(rcl_t* db, rcl_query_t* query, uint64_t* result) {
   *result = 0;
+
+  // pre-check
+  pthread_rwlock_rdlock(&(db->lock));
+  uint64_t blocks_count = db->blocks_count;
+  uint64_t logs_count = db->logs_count;
+  pthread_rwlock_unlock(&(db->lock));
+
+  if (blocks_count == 0 || logs_count == 0)
+    return RCL_SUCCESS;
+
+  // prepare
+  rcl_iquery_t* iquery = NULL;
+  rcl_result rc = rcl_make_iquery(query, &iquery);
+  if (rc != RCL_SUCCESS)
+    return rc;
+
+  // calc
+  pthread_rwlock_rdlock(&(db->lock));
+  uint64_t start = query->from_block, end = query->to_block;
+  if (end >= db->blocks_count)
+    end = db->blocks_count - 1;
 
   for (size_t number = start; number <= end; ++number) {
     rcl_block_t* block = rcl_get_block(db, number);
     assert(block != NULL);
 
-    if (block->logs_count == 0)
-      continue;
-
-    if (!has_addresses && !has_topics) {
+    if (!iquery->has_addresses && !iquery->has_topics) {
       *result += block->logs_count;
       continue;
     }
 
-    if (!rcl_block_check(block, query)) {
+    if (block->logs_count == 0 || !rcl_block_check(block, query))
       continue;
-    }
 
-    for (uint64_t l = block->offset, r = block->offset + block->logs_count;
-         l < r; ++l) {
+    uint64_t l = block->offset, r = block->offset + block->logs_count;
+    for (; l < r; ++l) {
       uint64_t page, offset;
       get_position(l, LOGS_PAGE_CAPACITY, &page, &offset);
 
-      rcl_page_t* logs_page = vector_at(&(db->data_pages), page);
-
-      if (query->address.len > 0) {
-        rcl_cell_address_t address =
-            file_as_addresses(&(logs_page->addresses))[offset];
-
-        if (!includes(address, addresses, query->address.len))
-          continue;
-      }
-
-      rcl_cell_topics_t* tpcs = file_as_topics(&(logs_page->topics));
-
-      bool topics_match = true;
-      for (size_t j = 0; topics_match && j < TOPICS_LENGTH; ++j) {
-        if (query->topics[j].len > 0) {
-          topics_match =
-              includes(tpcs[offset][j], topics[j], query->topics[j].len);
-        }
-      }
-
-      if (topics_match)
+      if (rcl_query_check_data(db, iquery, page, offset))
         ++(*result);
     }
   }
-
   pthread_rwlock_unlock(&(db->lock));
 
-  if (addresses != NULL)
-    free(addresses);
-
-  for (int i = 0; i < TOPICS_LENGTH; ++i)
-    if (topics[i] != NULL)
-      free(topics[i]);
-
+  free(iquery);
   return RCL_SUCCESS;
 }
 
@@ -668,7 +719,8 @@ static void* rcl_fetcher_thread(void* data) {
       break;
 
     if (blocks > height) {
-      rcl_debug("more blocks loaded than available; height: %" PRIu64 ", blocks: %" PRIu64 "\n",
+      rcl_debug("more blocks loaded than available; height: %" PRIu64
+                ", blocks: %" PRIu64 "\n",
                 height, blocks);
       sleep(1);
       continue;
@@ -694,8 +746,9 @@ static void* rcl_fetcher_thread(void* data) {
 
     pthread_rwlock_wrlock(&(db->lock));
     db->blocks_count += count;
-    rcl_debug("rcl_fetcher_thread; added %" PRIu64 " logs, blocks: %" PRIu64 "\n", logs.size,
-              db->blocks_count);
+    rcl_debug("rcl_fetcher_thread; added %" PRIu64 " logs, blocks: %" PRIu64
+              "\n",
+              logs.size, db->blocks_count);
     pthread_rwlock_unlock(&(db->lock));
   }
 

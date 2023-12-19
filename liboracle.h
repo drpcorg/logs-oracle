@@ -13,6 +13,7 @@ typedef enum {
   // User errors
   RCL_ERROR_INSERT_LOGS_TO_OLD_BLOCK,
   RCL_ERROR_INVALID_UPSTREAM,
+  RCL_ERROR_TOO_BIG_QUERY,
 
   // Environment errors
   RCL_ERROR_MEMORY_ALLOCATION,

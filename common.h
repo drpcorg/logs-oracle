@@ -5,6 +5,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <inttypes.h>
+#include <limits.h>
 #include <pthread.h>
 #include <stdarg.h>
 #include <stdatomic.h>
@@ -23,9 +24,6 @@
 #include <curl/curl.h>
 #include <jansson.h>
 
-// Section: lang defines
-
-// DLL utils; reference: https://gcc.gnu.org/wiki/Visibility
 #if defined _WIN32 || defined __CYGWIN__
 #define rcl_export __declspec(dllexport)
 #elif __GNUC__ >= 4
@@ -63,9 +61,12 @@
     fflush(stderr);                                      \
   } while (false)
 
-// Section: Utils
-enum { MAX_FILE_LENGTH = 256 };
-typedef char rcl_filename_t[MAX_FILE_LENGTH + 1];
+// Utils
+enum {
+  UPSTREAM_LIMIT = 4096,
+  MAX_FILE_LENGTH = PATH_MAX,
+};
+typedef char rcl_filepath_t[MAX_FILE_LENGTH + 1];
 
 rcl_inline bool includes(uint64_t key, uint64_t* arr, size_t size) {
   while (size-- > 0)
@@ -75,97 +76,20 @@ rcl_inline bool includes(uint64_t key, uint64_t* arr, size_t size) {
   return false;
 }
 
-rcl_inline uint64_t murmur64A(const void* key,
-                              const uint64_t len,
-                              const uint32_t seed) {
-  // MurmurHash was written by Austin Appleby, and is placed in the public
-  // domain. The author hereby disclaims copyright to this source code.
+int hex2bin(uint8_t* b, const char* str, int bytes);
 
-  const uint64_t m = 0xc6a4a7935bd1e995;
-  const int r = 47;
+uint64_t murmur64A(const void* key, const uint64_t len, const uint32_t seed);
 
-  uint64_t h = seed ^ (len * m);
+uint32_t xorshift32(void);
 
-  const uint64_t* data = (const uint64_t*)key;
-  const uint64_t* end = data + (len / 8);
+// bloom filter
+enum { LOGS_BLOOM_SIZE = 256 };
 
-  while (data != end) {
-    uint64_t k = *data++;
+typedef uint8_t bloom_t[LOGS_BLOOM_SIZE];
 
-    k *= m;
-    k ^= k >> r;
-    k *= m;
+#define bloom_init(bloom) memset(bloom, 0, sizeof(bloom_t));
 
-    h ^= k;
-    h *= m;
-  }
-
-  const uint8_t* data2 = (const uint8_t*)data;
-
-  switch (len & 7) {
-    case 7:
-      h ^= (uint64_t)(data2[6]) << 48;
-      /* Fall through. */
-    case 6:
-      h ^= (uint64_t)(data2[5]) << 40;
-      /* Fall through. */
-    case 5:
-      h ^= (uint64_t)(data2[4]) << 32;
-      /* Fall through. */
-    case 4:
-      h ^= (uint64_t)(data2[3]) << 24;
-      /* Fall through. */
-    case 3:
-      h ^= (uint64_t)(data2[2]) << 16;
-      /* Fall through. */
-    case 2:
-      h ^= (uint64_t)(data2[1]) << 8;
-      /* Fall through. */
-    case 1:
-      h ^= (uint64_t)(data2[0]);
-      h *= m;
-      /* Fall through. */
-  };
-
-  h ^= h >> r;
-  h *= m;
-  h ^= h >> r;
-
-  return h;
-}
-
-rcl_inline uint32_t xorshift32(void) {
-  static uint32_t randseed = 0;
-  if (randseed == 0)
-    randseed = (uint32_t)time(NULL);
-
-  uint32_t x = randseed;
-
-  x ^= x << 13;
-  x ^= x >> 7;
-  x ^= x << 17;
-
-  return randseed = x;
-}
-
-rcl_inline int hex2bin(uint8_t* b, const char* str, int bytes) {
-  size_t len = strlen(str);
-
-  if (len == bytes * 2 + 2 && str[0] == '0' &&
-      (str[1] == 'x' || str[1] == 'X')) {
-    str += 2;
-  } else if (len != bytes * 2) {
-    return -1;
-  }
-
-  unsigned int tmp;
-
-  for (int i = 0; i < bytes; ++i) {
-    sscanf(str + i * 2, "%02X", &tmp);
-    b[i] = (uint8_t)tmp;
-  }
-
-  return 0;
-}
+void bloom_add(bloom_t* bloom, uint8_t* hash);
+bool bloom_check(bloom_t* bloom, uint8_t* hash);
 
 #endif  // _RCL_COMMON_H

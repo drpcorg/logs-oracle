@@ -42,7 +42,7 @@ static size_t response_onsend_callback(void* contents,
     return 0;
   }
 
-  memcpy(&(response->buffer[response->size]), contents, chunksize);
+  rcl_memcpy(&(response->buffer[response->size]), contents, chunksize);
   response->size += chunksize;
   response->buffer[response->size] = 0;
 
