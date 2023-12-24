@@ -1,5 +1,4 @@
 CFLAGS+=-std=gnu11 -pthread
-LDFLAGS+=
 
 CFLAGS+=$(shell pkg-config --cflags libcurl jansson)
 LDFLAGS+=$(shell pkg-config --libs libcurl jansson)
@@ -10,7 +9,7 @@ CWARN=-Wall -Wextra -Wpedantic -Wnull-dereference -Wvla -Wshadow\
 DEBUG=
 
 ifdef DEBUG
-	CFLAGS+=-O0 -g3 -DDEBUG -DNDEBUG
+	CFLAGS+=-O0 -g3 -gdwarf-4 -DDEBUG -DNDEBUG
 else
 	CFLAGS+=-O3
 endif
@@ -43,7 +42,7 @@ liboracle.so: $(SRC) $(HDR)
 
 TESTS=$(wildcard test/*_test.c)
 
-libtest: CFLAGS+=$(shell pkg-config --cflags criterion) -std=gnu2x $(CWAR)
+libtest: CFLAGS+=$(shell pkg-config --cflags criterion) -std=gnu2x
 libtest: LDFLAGS+=$(shell pkg-config --libs criterion) 
 libtest: $(SRC) $(HDR) $(TESTS)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(SRC) $(TESTS)
@@ -52,11 +51,11 @@ libtest: $(SRC) $(HDR) $(TESTS)
 # Doracle (go wrapper server)
 .PHONY: doracle-build doracle-dev
 
-doracle-dev: export CGO_CFLAGS=$(CFLAGS)
-doracle-dev: export CGO_LDFLAGS=$(LDFLAGS)
 doracle-build:
 	cd doracle && go build -gcflags "all=-N -l" .
 
+doracle-dev: export CGO_CFLAGS=$(CFLAGS)
+doracle-dev: export CGO_LDFLAGS=$(LDFLAGS)
 doracle-dev: doracle-build
 	./doracle/doracle
 

@@ -54,29 +54,29 @@ vector_t make_uint64_vector(size_t n, ...) {
 
 // Samples
 static const char* addresses[] = {
-    "e4e50b96f70aab13a2d7e654d07d7d4173319653",
-    "e53ec727dbdeb9e2d5456c3be40cff031ab40a55",
-    "e8da2e3d904e279220a86634aafa4d3be43c89d9",
-    "e921401d18ed1ea4d64169d1576c32f9a7439694",
-    "e9a1a323b4c8fd5ce6842edaa0cd8af943cbdf22",
-    "eae6fd7d8c1740f3f1b03e9a5c35793cd260b9a6",
-    "f151980e7a781481709e8195744bf2399fb3cba4",
-    "f203ca1769ca8e9e8fe1da9d147db68b6c919817",
-    "f411903cbc70a74d22900a5de66a2dda66507255",
-    "f57e7e7c23978c3caec3c3548e3d615c346e79ff",
+    "0xe4e50b96f70aab13a2d7e654d07d7d4173319653",
+    "0xe53ec727dbdeb9e2d5456c3be40cff031ab40a55",
+    "0xe8da2e3d904e279220a86634aafa4d3be43c89d9",
+    "0xe921401d18ed1ea4d64169d1576c32f9a7439694",
+    "0xe9a1a323b4c8fd5ce6842edaa0cd8af943cbdf22",
+    "0xeae6fd7d8c1740f3f1b03e9a5c35793cd260b9a6",
+    "0xf151980e7a781481709e8195744bf2399fb3cba4",
+    "0xf203ca1769ca8e9e8fe1da9d147db68b6c919817",
+    "0xf411903cbc70a74d22900a5de66a2dda66507255",
+    "0xf57e7e7c23978c3caec3c3548e3d615c346e79ff",
 };
 
 static const char* topics[] = {
-    "a8dc30b66c6d4a8aac3d15925bfca09e42cac4a00c50f9949154b045088e2ac2",
-    "b3d987963d01b2f68493b4bdb130988f157ea43070d4ad840fee0466ed9370d9",
-    "b84b9c38fdca745491d1f429e19a8e2f07a19bc7f6dffb0003c1abb7cb873509",
-    "bb123b5c06d5408bbea3c4fef481578175cfb432e3b482c6186f02ed9086585b",
-    "bc7cd75a20ee27fd9adebab32041f755214dbc6bffa90cc0225b39da2e5c2d3b",
-    "bd5c436f8c83379009c1962310b8347e561d1900906d3fe4075b1596f8955f88",
-    "beee1e6e7fe307ddcf84b0a16137a4430ad5e2480fc4f4a8e250ab56ccd7630d",
-    "c3d58168c5ae7397731d063d5bbf3d657854427343f4c083240f7aacaa2d0f62",
-    "c4109843e0b7d514e4c093114b863f8e7d8d9a458c372cd51bfe526b588006c9",
-    "c42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67",
+    "0xa8dc30b66c6d4a8aac3d15925bfca09e42cac4a00c50f9949154b045088e2ac2",
+    "0xb3d987963d01b2f68493b4bdb130988f157ea43070d4ad840fee0466ed9370d9",
+    "0xb84b9c38fdca745491d1f429e19a8e2f07a19bc7f6dffb0003c1abb7cb873509",
+    "0xbb123b5c06d5408bbea3c4fef481578175cfb432e3b482c6186f02ed9086585b",
+    "0xbc7cd75a20ee27fd9adebab32041f755214dbc6bffa90cc0225b39da2e5c2d3b",
+    "0xbd5c436f8c83379009c1962310b8347e561d1900906d3fe4075b1596f8955f88",
+    "0xbeee1e6e7fe307ddcf84b0a16137a4430ad5e2480fc4f4a8e250ab56ccd7630d",
+    "0xc3d58168c5ae7397731d063d5bbf3d657854427343f4c083240f7aacaa2d0f62",
+    "0xc4109843e0b7d514e4c093114b863f8e7d8d9a458c372cd51bfe526b588006c9",
+    "0xc42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67",
 };
 
 // Wrappers
@@ -158,55 +158,41 @@ uint64_t db_make_query(rcl_t* db,
                        uint64_t to,
                        vector_t ad,
                        vector_t tpcs[TOPICS_LENGTH]) {
-  rcl_query_t q = {
-      .from_block = from,
-      .to_block = to,
-      .address = {.len = 0, .data = NULL},
-      .topics = {{.len = 0, .data = NULL},
-                 {.len = 0, .data = NULL},
-                 {.len = 0, .data = NULL},
-                 {.len = 0, .data = NULL}},
-  };
+  size_t tlen[TOPICS_LENGTH] = {0};
+  for (size_t i = 0; i < TOPICS_LENGTH; ++i)
+    tlen[i] = tpcs[i].size;
 
-  if (ad.size) {
-    q.address.len = ad.size;
-    q.address.data = malloc(sizeof(rcl_address_t) * ad.size);
+  rcl_query_t *q = NULL;
+  cr_expect(rcl_query_new(&q, ad.size, tlen) == RCL_SUCCESS, "Couldn't create query");
 
-    for (size_t i = 0; i < ad.size; ++i) {
-      size_t k = *(uint64_t*)vector_at(&ad, i);
-      q.address.data[i] = addresses[k];
-    }
+  q->from = from;
+  q->to = to;
+
+  for (size_t i = 0; i < ad.size; ++i) {
+    size_t k = *(uint64_t*)vector_at(&ad, i);
+    q->address[i].encoded = addresses[k];
   }
 
   for (size_t i = 0; i < TOPICS_LENGTH; ++i) {
     if (tpcs[i].size == 0)
       continue;
 
-    q.topics[i].len = tpcs[i].size;
-    q.topics[i].data = malloc(sizeof(rcl_hash_t) * tpcs[i].size);
-
     for (size_t j = 0; j < tpcs[i].size; ++j) {
       uint64_t k = *(uint64_t*)vector_at(&tpcs[i], j);
-      q.topics[i].data[j] = topics[k];
+      q->topics[i][j].encoded = topics[k];
     }
   }
 
   // Exec query
   uint64_t actual;
-  rcl_result result = rcl_query(db, &q, &actual);
+  rcl_result result = rcl_query(db, q, &actual);
   cr_expect(result == RCL_SUCCESS, "Expected sucessful query");
 
   // Clenup
-  if (ad.size)
-    free(q.address.data);
+  rcl_query_free(&q);
 
-  for (size_t i = 0; i < TOPICS_LENGTH; ++i) {
-    if (q.topics[i].data != NULL)
-      free(q.topics[i].data);
-
+  for (size_t i = 0; i < TOPICS_LENGTH; ++i)
     vector_destroy(&tpcs[i]);
-  }
-
   vector_destroy(&ad);
 
   return actual;
@@ -232,8 +218,6 @@ Test(liboracle, New) {
 
   rcl_free(db);
 }
-
-// TODO: TestUseAfterFree
 
 Test(liboracle, EmptyInsert) {
   rcl_t* db = db_make();

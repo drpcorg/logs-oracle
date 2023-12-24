@@ -11,6 +11,15 @@ final class constants$1 {
 
     // Suppresses default constructor, ensuring non-instantiability.
     private constants$1() {}
+    static final FunctionDescriptor rcl_insert$FUNC = FunctionDescriptor.of(Constants$root.C_INT$LAYOUT,
+        Constants$root.C_POINTER$LAYOUT,
+        Constants$root.C_LONG_LONG$LAYOUT,
+        Constants$root.C_POINTER$LAYOUT
+    );
+    static final MethodHandle rcl_insert$MH = RuntimeHelper.downcallHandle(
+        "rcl_insert",
+        constants$1.rcl_insert$FUNC
+    );
     static final FunctionDescriptor rcl_logs_count$FUNC = FunctionDescriptor.of(Constants$root.C_INT$LAYOUT,
         Constants$root.C_POINTER$LAYOUT,
         Constants$root.C_POINTER$LAYOUT

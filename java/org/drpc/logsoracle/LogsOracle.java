@@ -83,21 +83,38 @@ public class LogsOracle implements AutoCloseable {
         List<String> address,
         List<List<String>> topics
     ) throws Exception {
-        var query = rcl_query_t.allocate(arena);
+        var ctlen = arena.allocateArray(ValueLayout.JAVA_LONG,
+            topics.size() > 0 ? topics.get(0).size() : 0,
+            topics.size() > 1 ? topics.get(1).size() : 0,
+            topics.size() > 2 ? topics.get(2).size() : 0,
+            topics.size() > 3 ? topics.get(3).size() : 0
+        );
 
-        rcl_query_t.from_block$set(query, fromBlock);
-        rcl_query_t.to_block$set(query, toBlock);
+        var queryPtrPtr = arena.allocate(C_POINTER); // rcl_query_t**
+        int rc = rcl_query_new(queryPtrPtr, address.size(), ctlen);
+        if (rc != RCL_SUCCESS())
+            throw new Exception("liboracle: failed create query");
+
+        var queryPtr = queryPtrPtr.get(C_POINTER, 0); // rcl_query_t*
+
+        rcl_query_t.from$set(queryPtr, fromBlock);
+        rcl_query_t.to$set(queryPtr, toBlock);
 
         // address
-        var c_address = rcl_query_t.address$slice(query);
-        rcl_query_address.len$set(c_address, address.size());
+        var caddress = arena.allocateArray(rcl_query_address.$LAYOUT(), address.size());
+        for (long i = 0; i < address.size(); ++i) {
+            // var item = caddress.getAtIndex(rcl_query_address.$LAYOUT(), i);
+        }
+
+        rcl_query_t.alen$set(queryPtr, address.size());
+        rcl_query_t.address$set(queryPtr, caddress);
 
         // topics
-        var c_topics = rcl_query_t.topics$slice(query);
+        // var ctlen = rcl_query_t.topics$slice(queryPtr);
 
         // call
         var result = arena.allocate(C_POINTER);
-        int rc = rcl_query(connPtr, query, result);
+        rc = rcl_query(connPtr, queryPtr, result);
         if (rc != RCL_SUCCESS())
             throw new Exception("liboracle: failed query");
 

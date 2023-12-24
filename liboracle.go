@@ -4,13 +4,25 @@ import (
 	"fmt"
 	"os"
 	"runtime"
-	"sync"
 	"unsafe"
 )
 
 // #cgo CFLAGS: -std=gnu11 -pthread
 // #cgo pkg-config: libcurl jansson
 // #include "liboracle.h"
+/*
+void _add_address_to_query(rcl_query_t* query, _GoString_* strs) {
+	for (size_t i = 0; i < query->alen; ++i) {
+		query->address[i].encoded = _GoStringPtr(strs[i]);
+	}
+}
+
+void _add_topics_to_query(rcl_query_t* query, size_t j, _GoString_* strs) {
+	for (size_t i = 0; i < query->tlen[j]; ++i) {
+		query->topics[j][i].encoded = _GoStringPtr(strs[i]);
+	}
+}
+*/
 import "C"
 
 type Hash [32]byte    // see rcl_hash_t
@@ -27,12 +39,6 @@ type Query struct { // see rcl_query_t
 	ToBlock   uint64
 	Addresses []string
 	Topics    [][]string
-}
-
-var queriesPool = sync.Pool{
-	New: func() any {
-		return new(C.rcl_query_t)
-	},
 }
 
 type Conn struct {
@@ -84,70 +90,48 @@ func (conn *Conn) SetUpstream(upstream string) error {
 
 func (conn *Conn) Query(query *Query) (uint64, error) {
 	var pinner runtime.Pinner
+	pinner.Pin(query)
+	defer pinner.Unpin()
 
-	cquery := queriesPool.Get().(*C.rcl_query_t)
-	pinner.Pin(cquery)
+	tlen := [4]C.size_t{0}
 
-	cquery.from_block = C.uint64_t(query.FromBlock)
-	cquery.to_block = C.uint64_t(query.ToBlock)
+	if len(query.Topics) > len(query.Topics) {
+		return 0, fmt.Errorf("too many topics")
+	}
 
-	cquery.address.len = C.size_t(len(query.Addresses))
-	cquery.address.data = nil
+	for i := 0; i < len(query.Topics); i++ {
+		tlen[i] = C.size_t(len(query.Topics[i]))
+	}
+
+	var cquery *C.rcl_query_t
+	rc := C.rcl_query_new(
+		&cquery,
+		C.size_t(len(query.Addresses)),
+		&(tlen[0]),
+	)
+	if rc != C.RCL_SUCCESS {
+		return 0, fmt.Errorf("liboracle: query failed, code: %d", int(rc))
+	}
+	defer C.rcl_query_free(cquery)
+
+	cquery.from = C.uint64_t(query.FromBlock)
+	cquery.to = C.uint64_t(query.ToBlock)
 
 	if len(query.Addresses) > 0 {
-		tmp := make([](*C.char), len(query.Addresses))
-		for i := 0; i < len(query.Addresses); i++ {
-			tmp[i] = C.CString(query.Addresses[i])
-		}
-
-		defer func() {
-			for i := 0; i < len(query.Addresses); i++ {
-				C.free(unsafe.Pointer(tmp[i]))
-			}
-		}()
-
-		ptr := &tmp
-		pinner.Pin(ptr)
-
-		cquery.address.data = (**C.char)(unsafe.Pointer(ptr))
+		C._add_address_to_query(cquery, &(query.Addresses[0]))
 	}
 
-	if len(query.Topics) > len(cquery.topics) {
-		panic("too many topics")
-	}
-
-	for i := 0; i < len(cquery.topics); i++ {
-		cquery.topics[i].len = 0
-		cquery.topics[i].data = nil
-
-		if len(query.Topics) > i && len(query.Topics[i]) > 0 {
-			tmp := make([](*C.char), len(query.Topics[i]))
-			for j := 0; j < len(query.Topics[j]); j++ {
-				tmp[j] = C.CString(query.Topics[j][j])
-			}
-
-			defer func() {
-				for j := 0; j < len(query.Topics[i]); j++ {
-					C.free(unsafe.Pointer(tmp[j]))
-				}
-			}()
-
-			ptr := &tmp
-			pinner.Pin(ptr)
-
-			cquery.topics[i].len = C.size_t(len(query.Topics[i]))
-			cquery.topics[i].data = (**C.char)(unsafe.Pointer(ptr))
+	for i := 0; i < len(query.Topics); i++ {
+		if len(query.Topics[i]) > 0 {
+			C._add_topics_to_query(cquery, C.size_t(i), &(query.Topics[0][i]))
 		}
 	}
 
 	var count C.uint64_t
-	rc := C.rcl_query(conn.db, (*C.rcl_query_t)(unsafe.Pointer(cquery)), &count)
+	rc = C.rcl_query(conn.db, (*C.rcl_query_t)(unsafe.Pointer(cquery)), &count)
 	if rc != C.RCL_SUCCESS {
 		return 0, fmt.Errorf("liboracle: query failed, code: %d", int(rc))
 	}
-
-	pinner.Unpin()
-	queriesPool.Put(cquery)
 
 	return uint64(count), nil
 }

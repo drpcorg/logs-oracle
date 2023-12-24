@@ -10,91 +10,206 @@ import static java.lang.foreign.ValueLayout.*;
 /**
  * {@snippet :
  * struct {
- *     uint64_t from_block;
- *     uint64_t to_block;
- *     struct rcl_query_address address;
- *     struct rcl_query_topics topics[4];
+ *     uint64_t from;
+ *     uint64_t to;
+ *     size_t alen;
+ *     size_t tlen[4];
+ *     _Bool _has_addresses;
+ *     _Bool _has_topics;
+ *     struct rcl_query_address* address;
+ *     struct rcl_query_topics* topics[4];
  * };
  * }
  */
 public class rcl_query_t {
 
     static final StructLayout $struct$LAYOUT = MemoryLayout.structLayout(
-        Constants$root.C_LONG_LONG$LAYOUT.withName("from_block"),
-        Constants$root.C_LONG_LONG$LAYOUT.withName("to_block"),
-        MemoryLayout.structLayout(
-            Constants$root.C_LONG_LONG$LAYOUT.withName("len"),
-            Constants$root.C_POINTER$LAYOUT.withName("data")
-        ).withName("address"),
-        MemoryLayout.sequenceLayout(4, MemoryLayout.structLayout(
-            Constants$root.C_LONG_LONG$LAYOUT.withName("len"),
-            Constants$root.C_POINTER$LAYOUT.withName("data")
-        ).withName("rcl_query_topics")).withName("topics")
+        Constants$root.C_LONG_LONG$LAYOUT.withName("from"),
+        Constants$root.C_LONG_LONG$LAYOUT.withName("to"),
+        Constants$root.C_LONG_LONG$LAYOUT.withName("alen"),
+        MemoryLayout.sequenceLayout(4, Constants$root.C_LONG_LONG$LAYOUT).withName("tlen"),
+        Constants$root.C_BOOL$LAYOUT.withName("_has_addresses"),
+        Constants$root.C_BOOL$LAYOUT.withName("_has_topics"),
+        MemoryLayout.paddingLayout(48),
+        Constants$root.C_POINTER$LAYOUT.withName("address"),
+        MemoryLayout.sequenceLayout(4, Constants$root.C_POINTER$LAYOUT).withName("topics")
     );
     public static MemoryLayout $LAYOUT() {
         return rcl_query_t.$struct$LAYOUT;
     }
-    static final VarHandle from_block$VH = $struct$LAYOUT.varHandle(MemoryLayout.PathElement.groupElement("from_block"));
-    public static VarHandle from_block$VH() {
-        return rcl_query_t.from_block$VH;
+    static final VarHandle from$VH = $struct$LAYOUT.varHandle(MemoryLayout.PathElement.groupElement("from"));
+    public static VarHandle from$VH() {
+        return rcl_query_t.from$VH;
     }
     /**
      * Getter for field:
      * {@snippet :
-     * uint64_t from_block;
+     * uint64_t from;
      * }
      */
-    public static long from_block$get(MemorySegment seg) {
-        return (long)rcl_query_t.from_block$VH.get(seg);
+    public static long from$get(MemorySegment seg) {
+        return (long)rcl_query_t.from$VH.get(seg);
     }
     /**
      * Setter for field:
      * {@snippet :
-     * uint64_t from_block;
+     * uint64_t from;
      * }
      */
-    public static void from_block$set(MemorySegment seg, long x) {
-        rcl_query_t.from_block$VH.set(seg, x);
+    public static void from$set(MemorySegment seg, long x) {
+        rcl_query_t.from$VH.set(seg, x);
     }
-    public static long from_block$get(MemorySegment seg, long index) {
-        return (long)rcl_query_t.from_block$VH.get(seg.asSlice(index*sizeof()));
+    public static long from$get(MemorySegment seg, long index) {
+        return (long)rcl_query_t.from$VH.get(seg.asSlice(index*sizeof()));
     }
-    public static void from_block$set(MemorySegment seg, long index, long x) {
-        rcl_query_t.from_block$VH.set(seg.asSlice(index*sizeof()), x);
+    public static void from$set(MemorySegment seg, long index, long x) {
+        rcl_query_t.from$VH.set(seg.asSlice(index*sizeof()), x);
     }
-    static final VarHandle to_block$VH = $struct$LAYOUT.varHandle(MemoryLayout.PathElement.groupElement("to_block"));
-    public static VarHandle to_block$VH() {
-        return rcl_query_t.to_block$VH;
+    static final VarHandle to$VH = $struct$LAYOUT.varHandle(MemoryLayout.PathElement.groupElement("to"));
+    public static VarHandle to$VH() {
+        return rcl_query_t.to$VH;
     }
     /**
      * Getter for field:
      * {@snippet :
-     * uint64_t to_block;
+     * uint64_t to;
      * }
      */
-    public static long to_block$get(MemorySegment seg) {
-        return (long)rcl_query_t.to_block$VH.get(seg);
+    public static long to$get(MemorySegment seg) {
+        return (long)rcl_query_t.to$VH.get(seg);
     }
     /**
      * Setter for field:
      * {@snippet :
-     * uint64_t to_block;
+     * uint64_t to;
      * }
      */
-    public static void to_block$set(MemorySegment seg, long x) {
-        rcl_query_t.to_block$VH.set(seg, x);
+    public static void to$set(MemorySegment seg, long x) {
+        rcl_query_t.to$VH.set(seg, x);
     }
-    public static long to_block$get(MemorySegment seg, long index) {
-        return (long)rcl_query_t.to_block$VH.get(seg.asSlice(index*sizeof()));
+    public static long to$get(MemorySegment seg, long index) {
+        return (long)rcl_query_t.to$VH.get(seg.asSlice(index*sizeof()));
     }
-    public static void to_block$set(MemorySegment seg, long index, long x) {
-        rcl_query_t.to_block$VH.set(seg.asSlice(index*sizeof()), x);
+    public static void to$set(MemorySegment seg, long index, long x) {
+        rcl_query_t.to$VH.set(seg.asSlice(index*sizeof()), x);
     }
-    public static MemorySegment address$slice(MemorySegment seg) {
-        return seg.asSlice(16, 16);
+    static final VarHandle alen$VH = $struct$LAYOUT.varHandle(MemoryLayout.PathElement.groupElement("alen"));
+    public static VarHandle alen$VH() {
+        return rcl_query_t.alen$VH;
+    }
+    /**
+     * Getter for field:
+     * {@snippet :
+     * size_t alen;
+     * }
+     */
+    public static long alen$get(MemorySegment seg) {
+        return (long)rcl_query_t.alen$VH.get(seg);
+    }
+    /**
+     * Setter for field:
+     * {@snippet :
+     * size_t alen;
+     * }
+     */
+    public static void alen$set(MemorySegment seg, long x) {
+        rcl_query_t.alen$VH.set(seg, x);
+    }
+    public static long alen$get(MemorySegment seg, long index) {
+        return (long)rcl_query_t.alen$VH.get(seg.asSlice(index*sizeof()));
+    }
+    public static void alen$set(MemorySegment seg, long index, long x) {
+        rcl_query_t.alen$VH.set(seg.asSlice(index*sizeof()), x);
+    }
+    public static MemorySegment tlen$slice(MemorySegment seg) {
+        return seg.asSlice(24, 32);
+    }
+    static final VarHandle _has_addresses$VH = $struct$LAYOUT.varHandle(MemoryLayout.PathElement.groupElement("_has_addresses"));
+    public static VarHandle _has_addresses$VH() {
+        return rcl_query_t._has_addresses$VH;
+    }
+    /**
+     * Getter for field:
+     * {@snippet :
+     * _Bool _has_addresses;
+     * }
+     */
+    public static boolean _has_addresses$get(MemorySegment seg) {
+        return (boolean)rcl_query_t._has_addresses$VH.get(seg);
+    }
+    /**
+     * Setter for field:
+     * {@snippet :
+     * _Bool _has_addresses;
+     * }
+     */
+    public static void _has_addresses$set(MemorySegment seg, boolean x) {
+        rcl_query_t._has_addresses$VH.set(seg, x);
+    }
+    public static boolean _has_addresses$get(MemorySegment seg, long index) {
+        return (boolean)rcl_query_t._has_addresses$VH.get(seg.asSlice(index*sizeof()));
+    }
+    public static void _has_addresses$set(MemorySegment seg, long index, boolean x) {
+        rcl_query_t._has_addresses$VH.set(seg.asSlice(index*sizeof()), x);
+    }
+    static final VarHandle _has_topics$VH = $struct$LAYOUT.varHandle(MemoryLayout.PathElement.groupElement("_has_topics"));
+    public static VarHandle _has_topics$VH() {
+        return rcl_query_t._has_topics$VH;
+    }
+    /**
+     * Getter for field:
+     * {@snippet :
+     * _Bool _has_topics;
+     * }
+     */
+    public static boolean _has_topics$get(MemorySegment seg) {
+        return (boolean)rcl_query_t._has_topics$VH.get(seg);
+    }
+    /**
+     * Setter for field:
+     * {@snippet :
+     * _Bool _has_topics;
+     * }
+     */
+    public static void _has_topics$set(MemorySegment seg, boolean x) {
+        rcl_query_t._has_topics$VH.set(seg, x);
+    }
+    public static boolean _has_topics$get(MemorySegment seg, long index) {
+        return (boolean)rcl_query_t._has_topics$VH.get(seg.asSlice(index*sizeof()));
+    }
+    public static void _has_topics$set(MemorySegment seg, long index, boolean x) {
+        rcl_query_t._has_topics$VH.set(seg.asSlice(index*sizeof()), x);
+    }
+    static final VarHandle address$VH = $struct$LAYOUT.varHandle(MemoryLayout.PathElement.groupElement("address"));
+    public static VarHandle address$VH() {
+        return rcl_query_t.address$VH;
+    }
+    /**
+     * Getter for field:
+     * {@snippet :
+     * struct rcl_query_address* address;
+     * }
+     */
+    public static MemorySegment address$get(MemorySegment seg) {
+        return (java.lang.foreign.MemorySegment)rcl_query_t.address$VH.get(seg);
+    }
+    /**
+     * Setter for field:
+     * {@snippet :
+     * struct rcl_query_address* address;
+     * }
+     */
+    public static void address$set(MemorySegment seg, MemorySegment x) {
+        rcl_query_t.address$VH.set(seg, x);
+    }
+    public static MemorySegment address$get(MemorySegment seg, long index) {
+        return (java.lang.foreign.MemorySegment)rcl_query_t.address$VH.get(seg.asSlice(index*sizeof()));
+    }
+    public static void address$set(MemorySegment seg, long index, MemorySegment x) {
+        rcl_query_t.address$VH.set(seg.asSlice(index*sizeof()), x);
     }
     public static MemorySegment topics$slice(MemorySegment seg) {
-        return seg.asSlice(32, 64);
+        return seg.asSlice(72, 32);
     }
     public static long sizeof() { return $LAYOUT().byteSize(); }
     public static MemorySegment allocate(SegmentAllocator allocator) { return allocator.allocate($LAYOUT()); }

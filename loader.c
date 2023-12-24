@@ -108,7 +108,7 @@ int rcl_request_logs(const char* upstream,
                      uint64_t from,
                      uint64_t to,
                      vector_t* logs) {
-  rcl_debug("rcl_request_logs; start; %zu, to: %zu\n", from, to);
+  rcl_debug("rcl_request_logs: start; %zu, to: %zu\n", from, to);
 
   // load logs
   response_t response = {.size = 0, .buffer = NULL};
@@ -133,29 +133,29 @@ int rcl_request_logs(const char* upstream,
   response.buffer = NULL;
 
   if (!json_is_object(root)) {
-    rcl_error("rcl_request_logs; root is not an object\n");
+    rcl_error("rcl_request_logs: root is not an object\n");
     goto error;
   }
 
   json_t* rid = json_object_get(root, "id");
   if (!json_is_integer(rid)) {
-    rcl_error("rcl_request_logs; 'id' is not an integer\n");
+    rcl_error("rcl_request_logs: 'id' is not an integer\n");
     goto error;
   }
 
   json_t* error = json_object_get(root, "error");
   if (error != NULL) {
     if (json_is_string(error)) {
-      rcl_error("rcl_request_logs; RPC error: %s\n", json_string_value(error));
+      rcl_error("rcl_request_logs: RPC error: %s\n", json_string_value(error));
     } else if (json_is_object(error)) {
       json_t* msg = json_object_get(error, "message");
       json_t* code = json_object_get(error, "code");
 
-      rcl_error("rcl_request_logs; RPC error: [message] %s, [code] %lld\n",
+      rcl_error("rcl_request_logs: RPC error: [message] %s, [code] %lld\n",
                 (json_is_string(msg) ? json_string_value(msg) : "unrecognized"),
                 (json_is_integer(code) ? json_integer_value(code) : -1));
     } else {
-      rcl_error("rcl_request_logs; RPC error: unrecognized\n");
+      rcl_error("rcl_request_logs: RPC error: unrecognized\n");
     }
 
     goto error;
@@ -163,14 +163,14 @@ int rcl_request_logs(const char* upstream,
 
   json_t* result = json_object_get(root, "result");
   if (!json_is_array(result)) {
-    rcl_error("rcl_request_logs; result is not an array\n");
+    rcl_error("rcl_request_logs: result is not an array\n");
     goto error;
   }
 
   for (size_t i = 0, n = json_array_size(result); i < n; ++i) {
     json_t* item = json_array_get(result, i);
     if (!json_is_object(item)) {
-      rcl_error("rcl_request_logs; %zu item is not object\n", i);
+      rcl_error("rcl_request_logs: %zu item is not object\n", i);
       goto error;
     }
 
@@ -185,11 +185,11 @@ int rcl_request_logs(const char* upstream,
 
       log->block_number = (uint64_t)strtoll(start, &end, 16);
       if (errno == ERANGE) {
-        rcl_error("rcl_request_logs; %zu item, block_number range error\n", i);
+        rcl_error("rcl_request_logs: %zu item, block_number range error\n", i);
         goto error;
       }
     } else {
-      rcl_error("rcl_request_logs; %zu item, block_number is not a string\n",
+      rcl_error("rcl_request_logs: %zu item, block_number is not a string\n",
                 i);
       goto error;
     }
@@ -198,7 +198,7 @@ int rcl_request_logs(const char* upstream,
     if (json_is_string(address)) {
       hex2bin(log->address, json_string_value(address), sizeof(rcl_address_t));
     } else {
-      rcl_error("rcl_request_logs; %zu item, address is not a string\n", i);
+      rcl_error("rcl_request_logs: %zu item, address is not a string\n", i);
       goto error;
     }
 
@@ -206,7 +206,7 @@ int rcl_request_logs(const char* upstream,
     if (json_is_array(topics)) {
       size_t topics_size = json_array_size(topics);
       if (topics_size > TOPICS_LENGTH) {
-        fprintf(stderr, "rcl_request_logs; %zu item, too many topics\n", i);
+        fprintf(stderr, "rcl_request_logs: %zu item, too many topics\n", i);
         goto error;
       }
 
@@ -217,7 +217,7 @@ int rcl_request_logs(const char* upstream,
           json_t* topic = json_array_get(topics, j);
           if (!json_is_string(topic)) {
             fprintf(stderr,
-                    "rcl_request_logs; %zu item, %zu topic is not a string\n",
+                    "rcl_request_logs: %zu item, %zu topic is not a string\n",
                     i, j);
             goto error;
           }
@@ -226,7 +226,7 @@ int rcl_request_logs(const char* upstream,
         }
       }
     } else {
-      rcl_error("rcl_request_logs; %zu item, topics is not an array\n", i);
+      rcl_error("rcl_request_logs: %zu item, topics is not an array\n", i);
       goto error;
     }
   }

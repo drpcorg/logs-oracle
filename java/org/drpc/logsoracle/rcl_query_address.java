@@ -10,75 +10,81 @@ import static java.lang.foreign.ValueLayout.*;
 /**
  * {@snippet :
  * struct rcl_query_address {
- *     size_t len;
- *     char** data;
+ *     uint64_t _hash;
+ *     rcl_address_t _data;
+ *     char* encoded;
  * };
  * }
  */
 public class rcl_query_address {
 
     static final StructLayout $struct$LAYOUT = MemoryLayout.structLayout(
-        Constants$root.C_LONG_LONG$LAYOUT.withName("len"),
-        Constants$root.C_POINTER$LAYOUT.withName("data")
+        Constants$root.C_LONG_LONG$LAYOUT.withName("_hash"),
+        MemoryLayout.sequenceLayout(20, Constants$root.C_CHAR$LAYOUT).withName("_data"),
+        MemoryLayout.paddingLayout(32),
+        Constants$root.C_POINTER$LAYOUT.withName("encoded")
     ).withName("rcl_query_address");
     public static MemoryLayout $LAYOUT() {
         return rcl_query_address.$struct$LAYOUT;
     }
-    static final VarHandle len$VH = $struct$LAYOUT.varHandle(MemoryLayout.PathElement.groupElement("len"));
-    public static VarHandle len$VH() {
-        return rcl_query_address.len$VH;
+    static final VarHandle _hash$VH = $struct$LAYOUT.varHandle(MemoryLayout.PathElement.groupElement("_hash"));
+    public static VarHandle _hash$VH() {
+        return rcl_query_address._hash$VH;
     }
     /**
      * Getter for field:
      * {@snippet :
-     * size_t len;
+     * uint64_t _hash;
      * }
      */
-    public static long len$get(MemorySegment seg) {
-        return (long)rcl_query_address.len$VH.get(seg);
+    public static long _hash$get(MemorySegment seg) {
+        return (long)rcl_query_address._hash$VH.get(seg);
     }
     /**
      * Setter for field:
      * {@snippet :
-     * size_t len;
+     * uint64_t _hash;
      * }
      */
-    public static void len$set(MemorySegment seg, long x) {
-        rcl_query_address.len$VH.set(seg, x);
+    public static void _hash$set(MemorySegment seg, long x) {
+        rcl_query_address._hash$VH.set(seg, x);
     }
-    public static long len$get(MemorySegment seg, long index) {
-        return (long)rcl_query_address.len$VH.get(seg.asSlice(index*sizeof()));
+    public static long _hash$get(MemorySegment seg, long index) {
+        return (long)rcl_query_address._hash$VH.get(seg.asSlice(index*sizeof()));
     }
-    public static void len$set(MemorySegment seg, long index, long x) {
-        rcl_query_address.len$VH.set(seg.asSlice(index*sizeof()), x);
+    public static void _hash$set(MemorySegment seg, long index, long x) {
+        rcl_query_address._hash$VH.set(seg.asSlice(index*sizeof()), x);
     }
-    static final VarHandle data$VH = $struct$LAYOUT.varHandle(MemoryLayout.PathElement.groupElement("data"));
-    public static VarHandle data$VH() {
-        return rcl_query_address.data$VH;
+    public static MemorySegment _data$slice(MemorySegment seg) {
+        return seg.asSlice(8, 20);
+    }
+    static final VarHandle encoded$VH = $struct$LAYOUT.varHandle(MemoryLayout.PathElement.groupElement("encoded"));
+    public static VarHandle encoded$VH() {
+        return rcl_query_address.encoded$VH;
     }
     /**
      * Getter for field:
      * {@snippet :
-     * char** data;
+     * char* encoded;
      * }
      */
-    public static MemorySegment data$get(MemorySegment seg) {
-        return (java.lang.foreign.MemorySegment)rcl_query_address.data$VH.get(seg);
+    public static MemorySegment encoded$get(MemorySegment seg) {
+        return (java.lang.foreign.MemorySegment)rcl_query_address.encoded$VH.get(seg);
     }
     /**
      * Setter for field:
      * {@snippet :
-     * char** data;
+     * char* encoded;
      * }
      */
-    public static void data$set(MemorySegment seg, MemorySegment x) {
-        rcl_query_address.data$VH.set(seg, x);
+    public static void encoded$set(MemorySegment seg, MemorySegment x) {
+        rcl_query_address.encoded$VH.set(seg, x);
     }
-    public static MemorySegment data$get(MemorySegment seg, long index) {
-        return (java.lang.foreign.MemorySegment)rcl_query_address.data$VH.get(seg.asSlice(index*sizeof()));
+    public static MemorySegment encoded$get(MemorySegment seg, long index) {
+        return (java.lang.foreign.MemorySegment)rcl_query_address.encoded$VH.get(seg.asSlice(index*sizeof()));
     }
-    public static void data$set(MemorySegment seg, long index, MemorySegment x) {
-        rcl_query_address.data$VH.set(seg.asSlice(index*sizeof()), x);
+    public static void encoded$set(MemorySegment seg, long index, MemorySegment x) {
+        rcl_query_address.encoded$VH.set(seg.asSlice(index*sizeof()), x);
     }
     public static long sizeof() { return $LAYOUT().byteSize(); }
     public static MemorySegment allocate(SegmentAllocator allocator) { return allocator.allocate($LAYOUT()); }

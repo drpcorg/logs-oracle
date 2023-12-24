@@ -22,19 +22,27 @@ typedef enum {
 } rcl_result;
 
 struct rcl_query_address {
-  size_t len;
-  const char** data;
+  uint64_t _hash;
+  rcl_address_t _data;
+
+  const char* encoded;
 };
 
 struct rcl_query_topics {
-  size_t len;
-  const char** data;
+  uint64_t _hash;
+  rcl_hash_t _data;
+
+  const char* encoded;
 };
 
 typedef struct {
-  uint64_t from_block, to_block;
-  struct rcl_query_address address;
-  struct rcl_query_topics topics[TOPICS_LENGTH];
+  uint64_t from, to;
+  size_t alen, tlen[TOPICS_LENGTH];
+
+  bool _has_addresses, _has_topics;
+
+  struct rcl_query_address* address;
+  struct rcl_query_topics* topics[TOPICS_LENGTH];
 } rcl_query_t;
 
 struct db;
@@ -49,6 +57,10 @@ rcl_export rcl_result rcl_set_upstream(rcl_t* db, const char* upstream);
 rcl_export rcl_result rcl_query(rcl_t* db,
                                 rcl_query_t* query,
                                 uint64_t* result);
+rcl_export rcl_result rcl_query_new(rcl_query_t** query,
+                                    size_t alen,
+                                    size_t tlen[TOPICS_LENGTH]);
+rcl_export void rcl_query_free(rcl_query_t** query);
 rcl_export rcl_result rcl_insert(rcl_t* db, size_t size, rcl_log_t* logs);
 
 rcl_export rcl_result rcl_logs_count(rcl_t* db, uint64_t* result);

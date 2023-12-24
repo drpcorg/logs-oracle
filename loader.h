@@ -10,8 +10,8 @@
 
 enum { HASH_LENGTH = 32, ADDRESS_LENGTH = 20, TOPICS_LENGTH = 4 };
 
-typedef uint8_t rcl_hash_t[HASH_LENGTH];        // __attribute__((aligned(8)));
-typedef uint8_t rcl_address_t[ADDRESS_LENGTH];  // __attribute__((aligned(8)));
+typedef uint8_t rcl_address_t[ADDRESS_LENGTH];
+typedef uint8_t rcl_hash_t[HASH_LENGTH];
 
 typedef struct {
   uint64_t block_number;

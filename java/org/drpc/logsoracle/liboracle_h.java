@@ -51,19 +51,19 @@ public class liboracle_h  {
     }
     /**
      * {@snippet :
-     * enum .RCL_ERROR_MEMORY_ALLOCATION = 3;
+     * enum .RCL_ERROR_MEMORY_ALLOCATION = 4;
      * }
      */
     public static int RCL_ERROR_MEMORY_ALLOCATION() {
-        return (int)3L;
+        return (int)4L;
     }
     /**
      * {@snippet :
-     * enum .RCL_ERROR_UNKNOWN = 5;
+     * enum .RCL_ERROR_UNKNOWN = 6;
      * }
      */
     public static int RCL_ERROR_UNKNOWN() {
-        return (int)5L;
+        return (int)6L;
     }
     public static MethodHandle rcl_open$MH() {
         return RuntimeHelper.requireNonNull(constants$0.rcl_open$MH,"rcl_open");
@@ -145,8 +145,24 @@ public class liboracle_h  {
             throw new AssertionError("should not reach here", ex$);
         }
     }
+    public static MethodHandle rcl_query_new$MH() {
+        return RuntimeHelper.requireNonNull(constants$0.rcl_query_new$MH,"rcl_query_new");
+    }
+    /**
+     * {@snippet :
+     * rcl_result rcl_query_new(rcl_query_t** query, size_t alen, size_t tlen[4]);
+     * }
+     */
+    public static int rcl_query_new(MemorySegment query, long alen, MemorySegment tlen) {
+        var mh$ = rcl_query_new$MH();
+        try {
+            return (int)mh$.invokeExact(query, alen, tlen);
+        } catch (Throwable ex$) {
+            throw new AssertionError("should not reach here", ex$);
+        }
+    }
     public static MethodHandle rcl_insert$MH() {
-        return RuntimeHelper.requireNonNull(constants$0.rcl_insert$MH,"rcl_insert");
+        return RuntimeHelper.requireNonNull(constants$1.rcl_insert$MH,"rcl_insert");
     }
     /**
      * {@snippet :

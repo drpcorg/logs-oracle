@@ -52,14 +52,14 @@ final class constants$0 {
         "rcl_query",
         constants$0.rcl_query$FUNC
     );
-    static final FunctionDescriptor rcl_insert$FUNC = FunctionDescriptor.of(Constants$root.C_INT$LAYOUT,
+    static final FunctionDescriptor rcl_query_new$FUNC = FunctionDescriptor.of(Constants$root.C_INT$LAYOUT,
         Constants$root.C_POINTER$LAYOUT,
         Constants$root.C_LONG_LONG$LAYOUT,
         Constants$root.C_POINTER$LAYOUT
     );
-    static final MethodHandle rcl_insert$MH = RuntimeHelper.downcallHandle(
-        "rcl_insert",
-        constants$0.rcl_insert$FUNC
+    static final MethodHandle rcl_query_new$MH = RuntimeHelper.downcallHandle(
+        "rcl_query_new",
+        constants$0.rcl_query_new$FUNC
     );
 }
 

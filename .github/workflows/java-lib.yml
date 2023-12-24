@@ -17,11 +17,11 @@ jobs:
 
     - run: |
         brew reinstall $(brew --cache --arch=arm curl jansson)
-        make CFLAGS="-arch arm64" -j $(nproc) liboracle.so 
+        make CFLAGS="-arch arm64" -j $(nproc) clean liboracle.so 
         mv liboracle.so liboracle-arm64-macos.dylib
     - run: |
         brew reinstall $(brew --cache --arch=intel curl jansson)
-        make CFLAGS="-arch x86_64" -j $(nproc) liboracle.so 
+        make CFLAGS="-arch x86_64" -j $(nproc) clean liboracle.so 
         mv liboracle.so liboracle-x86_64-macos.dylib
 
     - uses: actions/upload-artifact@v3
@@ -40,7 +40,7 @@ jobs:
         sudo apt-get install -y clang-12 libjansson-dev libcurl4-openssl-dev
 
     - run: |
-        make -j $(nproc) liboracle.so 
+        make CFLAGS="-march=x86-64-v4" -j $(nproc) liboracle.so 
         mv liboracle.so liboracle-x86_64-linux.so
 
     - uses: actions/upload-artifact@v3

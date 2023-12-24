@@ -12,7 +12,7 @@ class Example {
         try (LogsOracle db = new LogsOracle(dir.getCanonicalPath(), 0L)) {
             System.out.println(db.GetLogsCount());
             System.out.println(db.GetBlocksCount());
-            System.out.println(db.Query(0L, 16L, Collections.emptyList(), Collections.emptyList()));
+            System.out.println(db.Query(1L, 16L, Collections.emptyList(), Collections.emptyList()));
         }
     }
 }
