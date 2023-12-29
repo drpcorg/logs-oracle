@@ -82,7 +82,7 @@ java-example: liboracle.so java/LogsOracle.jar
 .PHONY: clean format lint
 
 clean:
-	find -type f -regex '.*\.\(o\|d\|a\|so\|class\)' -exec rm -f {} \;
+	find . -type f -regex '.*\.\(o\|d\|a\|so\|class\)' -exec rm -f {} \;
 	rm -f doracle/doracle libtest java/LogsOracle.jar
 
 format:

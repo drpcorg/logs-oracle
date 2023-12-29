@@ -162,8 +162,9 @@ uint64_t db_make_query(rcl_t* db,
   for (size_t i = 0; i < TOPICS_LENGTH; ++i)
     tlen[i] = tpcs[i].size;
 
-  rcl_query_t *q = NULL;
-  cr_expect(rcl_query_new(&q, ad.size, tlen) == RCL_SUCCESS, "Couldn't create query");
+  rcl_query_t* q = NULL;
+  cr_expect(rcl_query_new(&q, ad.size, tlen) == RCL_SUCCESS,
+            "Couldn't create query");
 
   q->from = from;
   q->to = to;
@@ -189,7 +190,7 @@ uint64_t db_make_query(rcl_t* db,
   cr_expect(result == RCL_SUCCESS, "Expected sucessful query");
 
   // Clenup
-  rcl_query_free(&q);
+  rcl_query_free(q);
 
   for (size_t i = 0; i < TOPICS_LENGTH; ++i)
     vector_destroy(&tpcs[i]);

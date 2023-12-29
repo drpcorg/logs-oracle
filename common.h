@@ -43,11 +43,18 @@
 #define rcl_memcpy(dst, src, length) (void)memcpy(dst, src, (size_t)(length))
 #define rcl_memmove(dst, src, length) (void)memmove(dst, src, (size_t)(length))
 
+#if defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 199901)
+#define CURRENT_FUNC __func__
+#else
+#define CURRENT_FUNC "(unknown)"
+#endif
+
 #ifdef DEBUG
-#define rcl_debug(...)                                   \
-  do {                                                   \
-    fprintf(stderr, "DBG [" __FILE__ "]: " __VA_ARGS__); \
-    fflush(stderr);                                      \
+#define rcl_debug(...)                                                         \
+  do {                                                                         \
+    fprintf(stderr, "DBG [%s:%d -> %s]:\t", __FILE__, __LINE__, CURRENT_FUNC); \
+    fprintf(stderr, __VA_ARGS__);                                              \
+    fflush(stderr);                                                            \
   } while (false)
 #else
 #define rcl_debug(...) \
@@ -55,10 +62,11 @@
   } while (false)
 #endif
 
-#define rcl_error(...)                                   \
-  do {                                                   \
-    fprintf(stderr, "ERR [" __FILE__ "]: " __VA_ARGS__); \
-    fflush(stderr);                                      \
+#define rcl_error(...)                                                         \
+  do {                                                                         \
+    fprintf(stderr, "ERR [%s:%d -> %s]:\t", __FILE__, __LINE__, CURRENT_FUNC); \
+    fprintf(stderr, __VA_ARGS__);                                              \
+    fflush(stderr);                                                            \
   } while (false)
 
 // Utils

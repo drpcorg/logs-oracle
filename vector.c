@@ -2,6 +2,8 @@
 #include "common.h"
 
 bool vector_init(vector_t* v, uint64_t capacity, uint64_t item_size) {
+  capacity = 4096;
+
   if (capacity > 0) {
     v->buffer = calloc(capacity, item_size);
     if (rcl_unlikely(v->buffer == NULL)) {

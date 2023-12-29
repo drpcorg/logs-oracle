@@ -208,6 +208,9 @@ static rcl_result rcl_state_read(rcl_t* t) {
   if (count != 3)
     return RCL_ERROR_FS_IO;
 
+  rcl_debug("readed state: height = %zu, blocks = %zu, logs = %zu\n", t->height,
+            t->blocks_count, t->logs_count);
+
   return RCL_SUCCESS;
 }
 
@@ -222,6 +225,9 @@ static rcl_result rcl_state_write(rcl_t* t) {
 
   if (fflush(t->manifest) != 0)
     return RCL_ERROR_FS_IO;
+
+  rcl_debug("writed state: height = %zu, blocks = %zu, logs = %zu\n", t->height,
+            t->blocks_count, t->logs_count);
 
   return RCL_SUCCESS;
 }
@@ -254,21 +260,21 @@ static rcl_result rcl_db_restore(rcl_t* db, const char* state_filename) {
       return RCL_ERROR_FS_IO;
 
   // data pages
-  uint64_t logs_pages_count = db->blocks_count / LOGS_PAGE_CAPACITY;
-  if (logs_pages_count * LOGS_PAGE_CAPACITY < db->blocks_count)
+  uint64_t logs_pages_count = db->logs_count / LOGS_PAGE_CAPACITY;
+  if (logs_pages_count * LOGS_PAGE_CAPACITY < db->logs_count)
     logs_pages_count++;
 
   if (!vector_init(&(db->data_pages), logs_pages_count, sizeof(rcl_page_t)))
     return RCL_ERROR_UNKNOWN;
 
-  for (uint64_t i = 0; i < logs_pages_count; ++i) {
-    if (rcl_open_data_page(db) != 0)
-      return RCL_ERROR_UNKNOWN;
-  }
-
-  if (db->data_pages.size == 0)
+  size_t i = 0;
+  do {
     if (rcl_open_data_page(db) != 0)
       return RCL_ERROR_FS_IO;
+  } while (++i < logs_pages_count);
+
+  rcl_debug("restored new db from \"%s\", %zu blocks_pages, %zu logs_pages\n",
+            db->dir, blocks_pages_count, logs_pages_count);
 
   return RCL_SUCCESS;
 }
@@ -283,12 +289,12 @@ static rcl_result rcl_db_init(rcl_t* db, const char* state_filename) {
   db->blocks_count = 0;
   db->logs_count = 0;
 
-  if (!vector_init(&(db->blocks_pages), 8, sizeof(file_t)))
+  if (!vector_init(&(db->blocks_pages), 1, sizeof(file_t)))
     return RCL_ERROR_UNKNOWN;
   if (rcl_open_blocks_page(db) != 0)
     return RCL_ERROR_FS_IO;
 
-  if (!vector_init(&(db->data_pages), 8, sizeof(rcl_page_t)))
+  if (!vector_init(&(db->data_pages), 1, sizeof(rcl_page_t)))
     return RCL_ERROR_UNKNOWN;
   if (rcl_open_data_page(db) != 0)
     return RCL_ERROR_UNKNOWN;
@@ -296,6 +302,8 @@ static rcl_result rcl_db_init(rcl_t* db, const char* state_filename) {
   rcl_result wr = rcl_state_write(db);
   if (wr != RCL_SUCCESS)
     return wr;
+
+  rcl_debug("init new db in \"%s\"\n", db->dir);
 
   return RCL_SUCCESS;
 }
@@ -526,8 +534,8 @@ rcl_result rcl_query_new(rcl_query_t** result,
   return RCL_SUCCESS;
 }
 
-void rcl_query_free(rcl_query_t** query) {
-  free(*query);
+void rcl_query_free(rcl_query_t* query) {
+  free(query);
 }
 
 static bool rcl_query_check_data(rcl_t* db,
@@ -703,9 +711,8 @@ static void* rcl_fetcher_thread(void* data) {
 
     pthread_rwlock_wrlock(&(db->lock));
     db->blocks_count += count;
-    rcl_debug("rcl_fetcher_thread; added %" PRIu64 " logs, blocks: %" PRIu64
-              "\n",
-              logs.size, db->blocks_count);
+    rcl_debug("added %" PRIu64 " logs, blocks: %" PRIu64 "\n", logs.size,
+              db->blocks_count);
     pthread_rwlock_unlock(&(db->lock));
   }
 

@@ -32,13 +32,13 @@ static size_t response_onsend_callback(void* contents,
   size_t chunksize = size * nmemb;
   size_t datasize = response->size + chunksize + 1;
   if (datasize > MAX_RESPONSE_SIZE) {
-    rcl_error("response_onsend_callback; too big response\n");
+    rcl_error("too big response\n");
     return 0;
   }
 
   response->buffer = realloc(response->buffer, response->size + chunksize + 1);
   if (!response->buffer) {
-    rcl_error("response_onsend_callback; not enough memory\n");
+    rcl_error("not enough memory\n");
     return 0;
   }
 
@@ -75,16 +75,14 @@ static int rcl_fetch_logs(const char* upstream,
 
   CURLcode res = curl_easy_perform(handle);
   if (res != CURLE_OK) {
-    rcl_error("rcl_fetch_logs; curl_easy_perform() failed: %s\n",
-              curl_easy_strerror(res));
+    rcl_error("curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
     goto error;
   }
 
   uint64_t response_code = 0;
   curl_easy_getinfo(handle, CURLINFO_RESPONSE_CODE, &response_code);
   if (response_code != 200) {
-    rcl_error("rcl_fetch_logs; server responded with code %ld\n",
-              response_code);
+    rcl_error("server responded with code %ld\n", response_code);
     goto error;
   }
 
@@ -108,14 +106,14 @@ int rcl_request_logs(const char* upstream,
                      uint64_t from,
                      uint64_t to,
                      vector_t* logs) {
-  rcl_debug("rcl_request_logs: start; %zu, to: %zu\n", from, to);
+  rcl_debug("start: from %zu, to %zu\n", from, to);
 
   // load logs
   response_t response = {.size = 0, .buffer = NULL};
   if (rcl_fetch_logs(upstream, from, to, &response) != 0)
     goto error;
 
-  rcl_debug("rcl_request_logs: successfully loaded\n");
+  rcl_debug("successfully loaded\n");
 
   // parse logs
   json_error_t load_error;
@@ -123,7 +121,7 @@ int rcl_request_logs(const char* upstream,
 
   if (!root) {
     rcl_error(
-        "rcl_request_logs: couldn't parse response; error: %s, response: "
+        "couldn't parse response; error: %s, response: "
         "%.*s\n",
         load_error.text, response.size, response.buffer);
     goto error;
@@ -133,29 +131,29 @@ int rcl_request_logs(const char* upstream,
   response.buffer = NULL;
 
   if (!json_is_object(root)) {
-    rcl_error("rcl_request_logs: root is not an object\n");
+    rcl_error("root is not an object\n");
     goto error;
   }
 
   json_t* rid = json_object_get(root, "id");
   if (!json_is_integer(rid)) {
-    rcl_error("rcl_request_logs: 'id' is not an integer\n");
+    rcl_error("'id' is not an integer\n");
     goto error;
   }
 
   json_t* error = json_object_get(root, "error");
   if (error != NULL) {
     if (json_is_string(error)) {
-      rcl_error("rcl_request_logs: RPC error: %s\n", json_string_value(error));
+      rcl_error("RPC error: %s\n", json_string_value(error));
     } else if (json_is_object(error)) {
       json_t* msg = json_object_get(error, "message");
       json_t* code = json_object_get(error, "code");
 
-      rcl_error("rcl_request_logs: RPC error: [message] %s, [code] %lld\n",
+      rcl_error("RPC error: [message] %s, [code] %lld\n",
                 (json_is_string(msg) ? json_string_value(msg) : "unrecognized"),
                 (json_is_integer(code) ? json_integer_value(code) : -1));
     } else {
-      rcl_error("rcl_request_logs: RPC error: unrecognized\n");
+      rcl_error("RPC error: unrecognized\n");
     }
 
     goto error;
@@ -163,14 +161,14 @@ int rcl_request_logs(const char* upstream,
 
   json_t* result = json_object_get(root, "result");
   if (!json_is_array(result)) {
-    rcl_error("rcl_request_logs: result is not an array\n");
+    rcl_error("result is not an array\n");
     goto error;
   }
 
   for (size_t i = 0, n = json_array_size(result); i < n; ++i) {
     json_t* item = json_array_get(result, i);
     if (!json_is_object(item)) {
-      rcl_error("rcl_request_logs: %zu item is not object\n", i);
+      rcl_error("%zu item is not object\n", i);
       goto error;
     }
 
@@ -185,12 +183,11 @@ int rcl_request_logs(const char* upstream,
 
       log->block_number = (uint64_t)strtoll(start, &end, 16);
       if (errno == ERANGE) {
-        rcl_error("rcl_request_logs: %zu item, block_number range error\n", i);
+        rcl_error("%zu item, block_number range error\n", i);
         goto error;
       }
     } else {
-      rcl_error("rcl_request_logs: %zu item, block_number is not a string\n",
-                i);
+      rcl_error("%zu item, block_number is not a string\n", i);
       goto error;
     }
 
@@ -198,7 +195,7 @@ int rcl_request_logs(const char* upstream,
     if (json_is_string(address)) {
       hex2bin(log->address, json_string_value(address), sizeof(rcl_address_t));
     } else {
-      rcl_error("rcl_request_logs: %zu item, address is not a string\n", i);
+      rcl_error("%zu item, address is not a string\n", i);
       goto error;
     }
 
@@ -226,12 +223,12 @@ int rcl_request_logs(const char* upstream,
         }
       }
     } else {
-      rcl_error("rcl_request_logs: %zu item, topics is not an array\n", i);
+      rcl_error("%zu item, topics is not an array\n", i);
       goto error;
     }
   }
 
-  rcl_debug("rcl_request_logs: successfully parsed\n");
+  rcl_debug("successfully parsed\n");
 
   json_decref(root);
 
