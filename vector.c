@@ -2,8 +2,6 @@
 #include "common.h"
 
 bool vector_init(vector_t* v, uint64_t capacity, uint64_t item_size) {
-  capacity = 4096;
-
   if (capacity > 0) {
     v->buffer = calloc(capacity, item_size);
     if (rcl_unlikely(v->buffer == NULL)) {
@@ -35,17 +33,11 @@ void* vector_add(vector_t* v) {
       new_capacity = old_capacity + old_capacity / 2;
     }
 
-    void* buffer = calloc(new_capacity, v->item_size);
-    if (rcl_unlikely(buffer == NULL)) {
+    v->capacity = new_capacity;
+    v->buffer = realloc(v->buffer, new_capacity * v->item_size);
+    if (rcl_unlikely(v->buffer == NULL)) {
       return NULL;
     }
-    rcl_memcpy(buffer, v->buffer, old_capacity);
-
-    if (v->buffer != NULL)
-      free(v->buffer);
-
-    v->capacity = new_capacity;
-    v->buffer = buffer;
   }
 
   void* item = rcl_pointer_to(v->buffer, v->item_size * v->size);

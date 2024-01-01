@@ -5,7 +5,7 @@
 #include "vector.h"
 
 #define CA_CACHE_TIMEOUT 604800L
-#define TEXT_BUFFER_SIZE 4096L
+#define TEXT_BUFFER_SIZE 256L
 #define MAX_RESPONSE_SIZE (1024 * 1024 * 512)  // 512MB
 
 enum { HASH_LENGTH = 32, ADDRESS_LENGTH = 20, TOPICS_LENGTH = 4 };
@@ -22,21 +22,26 @@ typedef struct {
 typedef int (*rcl_upstream_callback_t)(vector_t* logs, void* data);
 
 typedef struct {
+  CURLU* url;
   uint64_t height, last;
-
   bool closed;
 
-  char* url;
   rcl_upstream_callback_t callback;
   void* callback_data;
 
   pthread_t* thrd;
+
+  // curl internal state
+  vector_t handles;
+  vector_t requests;
+  CURLM* multi_handle;
+  struct curl_slist* http_headers;
 } rcl_upstream_t;
 
-void rcl_upstream_init(rcl_upstream_t* self,
-                       uint64_t last,
-                       rcl_upstream_callback_t callback,
-                       void* callback_data);
+int rcl_upstream_init(rcl_upstream_t* self,
+                      uint64_t last,
+                      rcl_upstream_callback_t callback,
+                      void* callback_data);
 void rcl_upstream_free(rcl_upstream_t* self);
 
 int rcl_upstream_set_url(rcl_upstream_t* self, const char* url);

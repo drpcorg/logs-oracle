@@ -25,6 +25,9 @@ void vector_remove(vector_t* vector, void* item);
 
 #define vector_is_empty(vector) ((vector)->size == 0)
 
+#define vector_sort(vector, comp) \
+  qsort((vector)->buffer, (vector)->size, (vector)->item_size, comp)
+
 rcl_inline void* vector_remove_last(vector_t* vector) {
   vector->size--;
   return rcl_pointer_to(vector->buffer, vector->item_size * vector->size);

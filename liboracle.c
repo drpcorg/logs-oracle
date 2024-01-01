@@ -406,17 +406,14 @@ rcl_result rcl_update_height(rcl_t* db, uint64_t height) {
 static void* rcl_fetcher_thread(void* data);
 
 rcl_result rcl_set_upstream(rcl_t* db, const char* upstream) {
-  size_t n = strlen(upstream);
-  if (n > UPSTREAM_LIMIT)
-    return RCL_ERROR_INVALID_UPSTREAM;
-
-  if (rcl_upstream_set_url(&(db->upstream), upstream) == 0)
+  if (rcl_upstream_set_url(&(db->upstream), upstream) != 0)
     return RCL_ERROR_UNKNOWN;
 
   return RCL_SUCCESS;
 }
 
 rcl_result rcl_insert(rcl_t* db, size_t size, rcl_log_t* logs) {
+  int rc;
   rcl_result result = RCL_SUCCESS;
 
   if (size == 0)
@@ -424,53 +421,61 @@ rcl_result rcl_insert(rcl_t* db, size_t size, rcl_log_t* logs) {
 
   pthread_rwlock_wrlock(&(db->lock));
 
-  for (rcl_log_t *log = logs, *end = logs + size; log != end; ++log) {
-    if (rcl_unlikely(db->blocks_count > log->block_number + 1)) {
+  for (rcl_log_t *log = logs, *end = logs + size; log != end;) {
+    uint64_t block_number = log->block_number;
+
+    if (rcl_unlikely(db->blocks_count > block_number + 1)) {
+      rcl_debug("add to old block, current: %zu, blocks count: %zu\n",
+                block_number, db->blocks_count);
       result = RCL_ERROR_INSERT_LOGS_TO_OLD_BLOCK;
-      break;
+      goto error;
     }
 
-    if (log->block_number >= db->blocks_count) {
-      if (rcl_add_block(db, log->block_number) != 0) {
+    if (block_number >= db->blocks_count) {
+      if (rcl_add_block(db, block_number) != 0) {
         result = RCL_ERROR_UNKNOWN;
-        break;
+        goto error;
       }
     }
 
-    uint64_t page, offset;
-    get_position(db->logs_count, LOGS_PAGE_CAPACITY, &page, &offset);
-
-    if (db->data_pages.size <= page) {
-      if (rcl_open_data_page(db) != 0) {
-        result = RCL_ERROR_UNKNOWN;
-        break;
-      }
-    }
-
-    // insert logs
-    rcl_block_t* block = rcl_get_block(db, log->block_number);
+    rcl_block_t* block = rcl_get_block(db, block_number);
     assert(block != NULL);
 
-    rcl_page_t* logs_page = vector_at(&(db->data_pages), page);
-    assert(logs_page != NULL);
+    size_t count = 0;
+    for (; log != end && log->block_number == block_number; ++log) {
+      uint64_t page, offset;
+      get_position(db->logs_count + count, LOGS_PAGE_CAPACITY, &page, &offset);
 
-    bloom_add(&(block->logs_bloom), log->address);
-    file_as_addresses(logs_page->addresses)[offset] =
-        murmur64A(log->address, sizeof(rcl_address_t), HASH_SEED);
+      if (db->data_pages.size <= page) {
+        if (rcl_open_data_page(db) != 0) {
+          result = RCL_ERROR_UNKNOWN;
+          goto error;
+        }
+      }
 
-    for (size_t j = 0; j < TOPICS_LENGTH; ++j) {
-      bloom_add(&(block->logs_bloom), log->topics[j]);
-      file_as_topics(logs_page->topics)[offset][j] =
-          murmur64A(log->topics[j], sizeof(rcl_hash_t), HASH_SEED);
+      rcl_page_t* logs_page = vector_at(&(db->data_pages), page);
+      assert(logs_page != NULL);
+
+      bloom_add(&(block->logs_bloom), log->address);
+      file_as_addresses(logs_page->addresses)[offset] =
+          murmur64A(log->address, sizeof(rcl_address_t), HASH_SEED);
+
+      for (size_t j = 0; j < TOPICS_LENGTH; ++j) {
+        bloom_add(&(block->logs_bloom), log->topics[j]);
+        file_as_topics(logs_page->topics)[offset][j] =
+            murmur64A(log->topics[j], sizeof(rcl_hash_t), HASH_SEED);
+      }
+
+      count++;
     }
 
-    block->logs_count++;
-    db->logs_count++;
+    block->logs_count += count;
+    db->logs_count += count;
   }
 
-  int wr = rcl_state_write(db);
-  if (wr != RCL_SUCCESS)
-    result = wr;
+error:
+  if ((rc = rcl_state_write(db)) != RCL_SUCCESS)
+    result = rc;
 
   pthread_rwlock_unlock(&(db->lock));
   return result;
@@ -480,8 +485,8 @@ rcl_result rcl_insert(rcl_t* db, size_t size, rcl_log_t* logs) {
 // It is necessary to avoid memory fragmentation and also to limit the size of
 // the query.
 rcl_result rcl_query_alloc(rcl_query_t** query,
-                         size_t alen,
-                         size_t tlen[TOPICS_LENGTH]) {
+                           size_t alen,
+                           size_t tlen[TOPICS_LENGTH]) {
   size_t bytes = sizeof(rcl_query_t) + sizeof(struct rcl_query_address) * alen;
   for (size_t i = 0; i < TOPICS_LENGTH; ++i)
     bytes += sizeof(struct rcl_query_topics[TOPICS_LENGTH]) * tlen[i];

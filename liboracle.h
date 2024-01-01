@@ -77,8 +77,8 @@ rcl_export rcl_result rcl_query(rcl_t* db,
                                 rcl_query_t* query,
                                 uint64_t* result);
 rcl_export rcl_result rcl_query_alloc(rcl_query_t** query,
-                                    size_t alen,
-                                    size_t tlen[TOPICS_LENGTH]);
+                                      size_t alen,
+                                      size_t tlen[TOPICS_LENGTH]);
 rcl_export void rcl_query_free(rcl_query_t* query);
 rcl_export rcl_result rcl_insert(rcl_t* db, size_t size, rcl_log_t* logs);
 

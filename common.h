@@ -85,7 +85,6 @@
 
 // Utils
 enum {
-  UPSTREAM_LIMIT = 4096,
   MAX_FILE_LENGTH = PATH_MAX,
 };
 typedef char rcl_filepath_t[MAX_FILE_LENGTH + 1];
