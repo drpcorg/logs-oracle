@@ -103,8 +103,8 @@ func (conn *Conn) Query(query *Query) (uint64, error) {
 		tlen[i] = C.size_t(len(query.Topics[i]))
 	}
 
-	var cquery *C.rcl_query_t
-	rc := C.rcl_query_new(
+	var cquery *C.rcl_query_t = nil
+	rc := C.rcl_query_alloc(
 		&cquery,
 		C.size_t(len(query.Addresses)),
 		&(tlen[0]),

@@ -91,7 +91,7 @@ public class LogsOracle implements AutoCloseable {
         );
 
         var queryPtrPtr = arena.allocate(C_POINTER); // rcl_query_t**
-        int rc = rcl_query_new(queryPtrPtr, address.size(), ctlen);
+        int rc = rcl_query_alloc(queryPtrPtr, address.size(), ctlen);
         if (rc != RCL_SUCCESS())
             throw new Exception("liboracle: failed create query");
 

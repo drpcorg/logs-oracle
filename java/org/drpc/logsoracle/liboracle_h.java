@@ -145,16 +145,16 @@ public class liboracle_h  {
             throw new AssertionError("should not reach here", ex$);
         }
     }
-    public static MethodHandle rcl_query_new$MH() {
-        return RuntimeHelper.requireNonNull(constants$0.rcl_query_new$MH,"rcl_query_new");
+    public static MethodHandle rcl_query_alloc$MH() {
+        return RuntimeHelper.requireNonNull(constants$0.rcl_query_alloc$MH,"rcl_query_alloc");
     }
     /**
      * {@snippet :
-     * rcl_result rcl_query_new(rcl_query_t** query, size_t alen, size_t tlen[4]);
+     * rcl_result rcl_query_alloc(rcl_query_t** query, size_t alen, size_t tlen[4]);
      * }
      */
-    public static int rcl_query_new(MemorySegment query, long alen, MemorySegment tlen) {
-        var mh$ = rcl_query_new$MH();
+    public static int rcl_query_alloc(MemorySegment query, long alen, MemorySegment tlen) {
+        var mh$ = rcl_query_alloc$MH();
         try {
             return (int)mh$.invokeExact(query, alen, tlen);
         } catch (Throwable ex$) {

@@ -163,7 +163,7 @@ uint64_t db_make_query(rcl_t* db,
     tlen[i] = tpcs[i].size;
 
   rcl_query_t* q = NULL;
-  cr_expect(rcl_query_new(&q, ad.size, tlen) == RCL_SUCCESS,
+  cr_expect(rcl_query_alloc(&q, ad.size, tlen) == RCL_SUCCESS,
             "Couldn't create query");
 
   q->from = from;

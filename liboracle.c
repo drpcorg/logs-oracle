@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 #include "common.h"
 #include "file.h"
 #include "upstream.h"
@@ -478,18 +479,12 @@ rcl_result rcl_insert(rcl_t* db, size_t size, rcl_log_t* logs) {
 // Let's select the query as a single block and clear it the same way.
 // It is necessary to avoid memory fragmentation and also to limit the size of
 // the query.
-rcl_result rcl_query_new(rcl_query_t** result,
+rcl_result rcl_query_alloc(rcl_query_t** query,
                          size_t alen,
                          size_t tlen[TOPICS_LENGTH]) {
-  int rc;
-
-  size_t bytes = sizeof(rcl_query_t);
-  for (size_t i = 0; i < alen; ++i)
-    bytes += sizeof(rcl_address_t) + sizeof(uint64_t);
-
+  size_t bytes = sizeof(rcl_query_t) + sizeof(struct rcl_query_address) * alen;
   for (size_t i = 0; i < TOPICS_LENGTH; ++i)
-    for (size_t j = 0; j < tlen[i]; ++j)
-      bytes += sizeof(rcl_hash_t) + sizeof(uint64_t);
+    bytes += sizeof(struct rcl_query_topics[TOPICS_LENGTH]) * tlen[i];
 
   if (bytes > RCL_QUERY_SIZE_LIMIT)
     return RCL_ERROR_TOO_BIG_QUERY;
@@ -498,32 +493,29 @@ rcl_result rcl_query_new(rcl_query_t** result,
   if (ptr == NULL)
     return RCL_ERROR_MEMORY_ALLOCATION;
 
-  rcl_query_t* query = ptr;
+  *query = (void*)ptr;
   ptr += sizeof(rcl_query_t);
 
-  query->address = ptr;
-  ptr += sizeof(query->address[0]) * alen;
+  (*query)->address = (void*)ptr;
+  ptr += sizeof(struct rcl_query_address) * alen;
 
   for (size_t i = 0; i < TOPICS_LENGTH; ++i) {
-    if (tlen[i]) {
-      query->topics[i] = ptr;
-      ptr += sizeof(query->topics[i][0]) * tlen[i];
+    if (tlen[i] > 0) {
+      (*query)->topics[i] = ptr;
+      ptr += sizeof(struct rcl_query_topics[TOPICS_LENGTH]) * tlen[i];
     } else {
-      query->topics[i] = NULL;
+      (*query)->topics[i] = NULL;
     }
   }
 
-  query->alen = alen;
-  for (size_t i = 0; i < TOPICS_LENGTH; ++i)
-    query->tlen[i] = tlen[i];
-
-  *result = query;
+  (*query)->alen = alen;
+  memcpy((*query)->tlen, tlen, sizeof(size_t) * TOPICS_LENGTH);
 
   return RCL_SUCCESS;
 }
 
 void rcl_query_free(rcl_query_t* query) {
-  free(query);
+  free((void*)query);
 }
 
 static bool rcl_query_check_data(rcl_t* db,
