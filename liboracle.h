@@ -5,7 +5,7 @@
 #include <stdint.h>
 
 #include "common.h"
-#include "loader.h"
+#include "upstream.h"
 
 typedef enum {
   RCL_SUCCESS = 0,

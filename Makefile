@@ -1,4 +1,4 @@
-CFLAGS+=-std=gnu11 -pthread
+CFLAGS+=-std=gnu11 -mtune=generic -pipe -pthread
 
 CFLAGS+=$(shell pkg-config --cflags libcurl jansson)
 LDFLAGS+=$(shell pkg-config --libs libcurl jansson)

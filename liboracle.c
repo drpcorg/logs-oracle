@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include "common.h"
 #include "file.h"
-#include "loader.h"
+#include "upstream.h"
 #include "vector.h"
 
 enum { RCL_QUERY_SIZE_LIMIT = 4 * 1024 * 1024 };  // 4MB RAM for query
@@ -80,13 +80,11 @@ struct db {
   uint64_t ram_limit;
   rcl_filepath_t dir;
 
-  bool closed;
-  char* upstream;
-  pthread_t* fetcher_thread;
+  rcl_upstream_t upstream;
 
   // DB state
   FILE* manifest;
-  uint64_t height, blocks_count, logs_count;
+  uint64_t blocks_count, logs_count;
 
   // Data pages
   vector_t blocks_pages;  // <file_t>
@@ -202,14 +200,14 @@ static rcl_result rcl_state_read(rcl_t* t) {
   if (err != 0)
     return RCL_ERROR_FS_IO;
 
-  int count = fscanf(t->manifest, "%" PRIu64 " %" PRIu64 " %" PRIu64 "",
-                     &t->height, &t->blocks_count, &t->logs_count);
+  int count = fscanf(t->manifest, "%" PRIu64 " %" PRIu64 "", &t->blocks_count,
+                     &t->logs_count);
 
-  if (count != 3)
+  if (count != 2)
     return RCL_ERROR_FS_IO;
 
-  rcl_debug("readed state: height = %zu, blocks = %zu, logs = %zu\n", t->height,
-            t->blocks_count, t->logs_count);
+  rcl_debug("readed state: blocks = %zu, logs = %zu\n", t->blocks_count,
+            t->logs_count);
 
   return RCL_SUCCESS;
 }
@@ -218,16 +216,16 @@ static rcl_result rcl_state_write(rcl_t* t) {
   if (fseek(t->manifest, 0, SEEK_SET) != 0)
     return RCL_ERROR_FS_IO;
 
-  int bytes = fprintf(t->manifest, "%" PRIu64 " %" PRIu64 " %" PRIu64 "",
-                      t->height, t->blocks_count, t->logs_count);
+  int bytes = fprintf(t->manifest, "%" PRIu64 " %" PRIu64 "", t->blocks_count,
+                      t->logs_count);
   if (bytes <= 0)
     return RCL_ERROR_FS_IO;
 
   if (fflush(t->manifest) != 0)
     return RCL_ERROR_FS_IO;
 
-  rcl_debug("writed state: height = %zu, blocks = %zu, logs = %zu\n", t->height,
-            t->blocks_count, t->logs_count);
+  rcl_debug("writed state: blocks = %zu, logs = %zu\n", t->blocks_count,
+            t->logs_count);
 
   return RCL_SUCCESS;
 }
@@ -285,7 +283,6 @@ static rcl_result rcl_db_init(rcl_t* db, const char* state_filename) {
     return RCL_ERROR_UNKNOWN;
   }
 
-  db->height = 0;
   db->blocks_count = 0;
   db->logs_count = 0;
 
@@ -308,6 +305,18 @@ static rcl_result rcl_db_init(rcl_t* db, const char* state_filename) {
   return RCL_SUCCESS;
 }
 
+static int rcl_upstream_callback(vector_t* logs, void* data) {
+  rcl_t* db = data;
+
+  int rc = rcl_insert(db, logs->size, (rcl_log_t*)(logs->buffer));
+  if (rc != RCL_SUCCESS) {
+    rcl_error("couldn't to insert fetched logs; code %d\n", rc);
+    return -1;
+  }
+
+  return 0;
+}
+
 rcl_result rcl_open(char* dir, uint64_t ram_limit, rcl_t** db_ptr) {
   if (curl_global_init(CURL_GLOBAL_DEFAULT) != 0) {
     return RCL_ERROR_UNKNOWN;
@@ -324,9 +333,6 @@ rcl_result rcl_open(char* dir, uint64_t ram_limit, rcl_t** db_ptr) {
     return RCL_ERROR_UNKNOWN;
   }
 
-  db->closed = false;
-  db->upstream = NULL;
-  db->fetcher_thread = NULL;
   db->ram_limit = ram_limit;
   strncpy(db->dir, dir, MAX_FILE_LENGTH);
 
@@ -337,29 +343,28 @@ rcl_result rcl_open(char* dir, uint64_t ram_limit, rcl_t** db_ptr) {
     return RCL_ERROR_UNKNOWN;
   }
 
+  rcl_result result = RCL_SUCCESS;
   if (access(state_filename, F_OK) == 0) {
-    return rcl_db_restore(db, state_filename);
+    result = rcl_db_restore(db, state_filename);
   } else {
-    return rcl_db_init(db, state_filename);
+    result = rcl_db_init(db, state_filename);
   }
+
+  if (result != RCL_SUCCESS)
+    return result;
+
+  rcl_upstream_init(&(db->upstream),
+                    db->blocks_count == 0 ? 0 : db->blocks_count - 1,
+                    rcl_upstream_callback, db);
+
+  return RCL_SUCCESS;
 }
 
 void rcl_free(rcl_t* db) {
-  // Close
-  pthread_rwlock_wrlock(&(db->lock));
-  db->closed = true;
-  pthread_rwlock_unlock(&(db->lock));
-
-  // Wait fetcher
-  pthread_rwlock_rdlock(&(db->lock));
-  if (db->fetcher_thread) {
-    pthread_join(*(db->fetcher_thread), NULL);
-    free(db->fetcher_thread);
-  }
-  pthread_rwlock_unlock(&(db->lock));
-
   // Clear db
   pthread_rwlock_wrlock(&(db->lock));
+
+  rcl_upstream_free(&(db->upstream));
 
   rcl_result _ = rcl_state_write(db);
   fclose(db->manifest);
@@ -390,7 +395,7 @@ rcl_result rcl_update_height(rcl_t* db, uint64_t height) {
   rcl_result result = RCL_SUCCESS;
 
   pthread_rwlock_wrlock(&(db->lock));
-  db->height = height;
+  rcl_upstream_set_height(&(db->upstream), height);
   result = rcl_state_write(db);
   pthread_rwlock_unlock(&(db->lock));
 
@@ -400,31 +405,14 @@ rcl_result rcl_update_height(rcl_t* db, uint64_t height) {
 static void* rcl_fetcher_thread(void* data);
 
 rcl_result rcl_set_upstream(rcl_t* db, const char* upstream) {
-  rcl_result result = RCL_SUCCESS;
-
   size_t n = strlen(upstream);
   if (n > UPSTREAM_LIMIT)
     return RCL_ERROR_INVALID_UPSTREAM;
 
-  pthread_rwlock_wrlock(&(db->lock));
+  if (rcl_upstream_set_url(&(db->upstream), upstream) == 0)
+    return RCL_ERROR_UNKNOWN;
 
-  db->upstream = realloc(db->upstream, n + 1);
-  strncpy(db->upstream, upstream, n + 1);
-
-  if (db->fetcher_thread == NULL) {
-    db->fetcher_thread = malloc(sizeof(pthread_t));
-
-    pthread_attr_t attr;
-    pthread_attr_init(&attr);
-
-    pthread_create(db->fetcher_thread, &attr, rcl_fetcher_thread, db);
-  }
-
-  result = rcl_state_write(db);
-
-  pthread_rwlock_unlock(&(db->lock));
-
-  return result;
+  return RCL_SUCCESS;
 }
 
 rcl_result rcl_insert(rcl_t* db, size_t size, rcl_log_t* logs) {
@@ -657,64 +645,4 @@ rcl_result rcl_logs_count(rcl_t* db, uint64_t* result) {
   pthread_rwlock_unlock(&(db->lock));
 
   return RCL_SUCCESS;
-}
-
-static void* rcl_fetcher_thread(void* data) {
-  enum { LOGS_REQUEST_BATCH = 256 };
-
-  int rc;
-  rcl_t* db = (rcl_t*)data;
-
-  vector_t logs;
-  vector_init(&logs, 16, sizeof(rcl_log_t));
-
-  rcl_debug("run fetcher thread\n");
-
-  char upstream[UPSTREAM_LIMIT + 1] = {0};
-
-  for (;;) {
-    pthread_rwlock_rdlock(&(db->lock));
-    bool closed = db->closed;
-    uint64_t height = db->height;
-    uint64_t blocks = db->blocks_count;
-    strcpy(upstream, db->upstream);
-    pthread_rwlock_unlock(&(db->lock));
-
-    if (closed)
-      break;
-
-    if (blocks > height) {
-      rcl_debug("more blocks loaded than available; height: %" PRIu64
-                ", blocks: %" PRIu64 "\n",
-                height, blocks);
-      sleep(1);
-      continue;
-    }
-
-    vector_reset(&logs);
-
-    size_t count = LOGS_REQUEST_BATCH;
-    if (blocks + count > height)
-      count = height - blocks;
-
-    rc = rcl_request_logs(upstream, blocks, blocks + count, &logs);
-    if (rc != 0) {
-      rcl_error("couldn't to fetch logs; code: %d\n", rc);
-      continue;
-    }
-
-    rc = rcl_insert(db, logs.size, (rcl_log_t*)(logs.buffer));
-    if (rc != RCL_SUCCESS) {
-      rcl_error("couldn't to insert fetched logs; code %d\n", rc);
-      continue;
-    }
-
-    pthread_rwlock_wrlock(&(db->lock));
-    db->blocks_count += count;
-    rcl_debug("added %" PRIu64 " logs, blocks: %" PRIu64 "\n", logs.size,
-              db->blocks_count);
-    pthread_rwlock_unlock(&(db->lock));
-  }
-
-  pthread_exit(0);
 }

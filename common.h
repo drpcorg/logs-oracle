@@ -32,6 +32,20 @@
 #define rcl_export
 #endif
 
+#define max(a, b)           \
+  ({                        \
+    __typeof__(a) _a = (a); \
+    __typeof__(b) _b = (b); \
+    _a > _b ? _a : _b;      \
+  })
+
+#define min(a, b)           \
+  ({                        \
+    __typeof__(a) _a = (a); \
+    __typeof__(b) _b = (b); \
+    _a < _b ? _a : _b;      \
+  })
+
 #define rcl_inline static inline __attribute__((always_inline))
 
 #define rcl_expect(c, x) __builtin_expect((long)(x), (c))

@@ -1,5 +1,57 @@
-#include "loader.h"
-#include "common.h"
+#include "upstream.h"
+
+static void* rcl_fetcher_thread(void* data);
+
+void rcl_upstream_init(rcl_upstream_t* self,
+                       uint64_t last,
+                       rcl_upstream_callback_t callback,
+                       void* callback_data) {
+  curl_global_init(CURL_GLOBAL_DEFAULT);
+
+  self->thrd = NULL;
+  self->closed = false;
+  self->last = last;
+  self->height = 0;
+  self->callback = callback;
+  self->callback_data = callback_data;
+}
+
+void rcl_upstream_free(rcl_upstream_t* self) {
+  curl_global_cleanup();
+
+  self->closed = true;
+  self->callback_data = NULL;
+
+  if (self->thrd != NULL) {
+    pthread_join(*(self->thrd), NULL);
+    free(self->thrd);
+  }
+}
+
+void rcl_upstream_set_height(rcl_upstream_t* self, uint64_t height) {
+  self->height = height;
+}
+
+int rcl_upstream_set_url(rcl_upstream_t* self, const char* url) {
+  size_t n = strlen(url);
+
+  self->url = realloc(self->url, n + 1);
+  strncpy(self->url, url, n + 1);
+
+  if (self->thrd == NULL) {
+    self->thrd = malloc(sizeof(pthread_t));
+    if (self->thrd == NULL) {
+      return -1;
+    }
+
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+
+    pthread_create(self->thrd, &attr, rcl_fetcher_thread, self);
+  }
+
+  return 0;
+}
 
 static void rcl_crawler_format_request(char* buffer,
                                        size_t buffer_size,
@@ -7,8 +59,8 @@ static void rcl_crawler_format_request(char* buffer,
                                        uint64_t from_block,
                                        uint64_t to_block) {
   static const char pattern[] =
-      "{"
-      "\"id\":%zu,"
+      "{\"id\":%" PRId64
+      ","
       "\"jsonrpc\":\"2.0\","
       "\"method\":\"eth_getLogs\","
       "\"params\":[{\"fromBlock\":\"0x%" PRIx64 "\",\"toBlock\":\"0x%" PRIx64
@@ -102,7 +154,7 @@ error:
   return -1;
 }
 
-int rcl_request_logs(const char* upstream,
+int rcl_request_logs(rcl_upstream_t* self,
                      uint64_t from,
                      uint64_t to,
                      vector_t* logs) {
@@ -110,7 +162,7 @@ int rcl_request_logs(const char* upstream,
 
   // load logs
   response_t response = {.size = 0, .buffer = NULL};
-  if (rcl_fetch_logs(upstream, from, to, &response) != 0)
+  if (rcl_fetch_logs(self->url, from, to, &response) != 0)
     goto error;
 
   rcl_debug("successfully loaded\n");
@@ -203,7 +255,7 @@ int rcl_request_logs(const char* upstream,
     if (json_is_array(topics)) {
       size_t topics_size = json_array_size(topics);
       if (topics_size > TOPICS_LENGTH) {
-        fprintf(stderr, "rcl_request_logs: %zu item, too many topics\n", i);
+        rcl_error("%zu item, too many topics\n", i);
         goto error;
       }
 
@@ -213,9 +265,7 @@ int rcl_request_logs(const char* upstream,
         if (j < topics_size) {
           json_t* topic = json_array_get(topics, j);
           if (!json_is_string(topic)) {
-            fprintf(stderr,
-                    "rcl_request_logs: %zu item, %zu topic is not a string\n",
-                    i, j);
+            rcl_error("%zu item, %zu topic is not a string\n", i, j);
             goto error;
           }
 
@@ -242,4 +292,57 @@ error:
     json_decref(root);
 
   return -1;
+}
+
+static void* rcl_fetcher_thread(void* data) {
+  enum { LOGS_REQUEST_BATCH = 256 };
+
+  int rc;
+  rcl_upstream_t* self = data;
+
+  vector_t logs;
+  vector_init(&logs, 16, sizeof(rcl_log_t));
+
+  rcl_debug("run fetcher thread\n");
+
+  char upstream[UPSTREAM_LIMIT + 1] = {0};
+
+  while (!self->closed) {
+    if (self->height == 0) {
+      sleep(1);
+      continue;
+    }
+
+    vector_reset(&logs);
+    uint64_t start = self->last + 1;
+
+    if (start > self->height) {
+      rcl_debug("more blocks loaded than available; height: %" PRIu64
+                ", start: %" PRIu64 "\n",
+                self->height, start);
+      sleep(1);
+      continue;
+    }
+
+    size_t count = min(LOGS_REQUEST_BATCH, self->height - start);
+
+    rc = rcl_request_logs(self, start, start + count, &logs);
+    if (rc != 0) {
+      rcl_error("couldn't to fetch logs; code: %d\n", rc);
+      continue;
+    }
+
+    rc = self->callback(&logs, self->callback_data);
+    if (rc != 0) {
+      rcl_error("couldn't add logs; code: %d\n", rc);
+      continue;
+    }
+
+    rcl_debug("added %" PRIu64 " logs, last: %zu, height: %zu\n", logs.size,
+              self->last, self->height);
+
+    self->last = start + count;
+  }
+
+  pthread_exit(0);
 }
