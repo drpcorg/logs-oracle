@@ -70,32 +70,37 @@ int rcl_upstream_init(rcl_upstream_t* self,
 }
 
 void rcl_upstream_free(rcl_upstream_t* self) {
-  curl_global_cleanup();
+  // notify
+  self->closed = true;
 
-  if (self->url)
-    curl_url_cleanup(self->url);
-  curl_slist_free_all(self->http_headers);
+  // wait enf end of upstream
+  if (self->thrd) {
+    pthread_join(*(self->thrd), NULL);
+    free(self->thrd);
+  }
 
-  curl_multi_cleanup(self->multi_handle);
+  // clear
+  if (self->multi_handle)
+    curl_multi_cleanup(self->multi_handle);
 
   for (size_t i = 0; i < CONNECTIONS_COUNT; ++i) {
     CURL** handle = vector_at(&(self->handles), i);
     curl_easy_cleanup(*handle);
 
     req_t* req = vector_at(&(self->requests), i);
+    vector_destroy(&(req->logs));
     if (req->buffer)
       free(req->buffer);
-    vector_destroy(&(req->logs));
   }
-  vector_reset(&(self->handles));
+  vector_destroy(&(self->requests));
+  vector_destroy(&(self->handles));
 
-  self->closed = true;
-  self->callback_data = NULL;
+  if (self->url)
+    curl_url_cleanup(self->url);
+  if (self->http_headers)
+    curl_slist_free_all(self->http_headers);
 
-  if (self->thrd != NULL) {
-    pthread_join(*(self->thrd), NULL);
-    free(self->thrd);
-  }
+  curl_global_cleanup();
 }
 
 void rcl_upstream_set_height(rcl_upstream_t* self, uint64_t height) {
@@ -139,7 +144,8 @@ static size_t req_onsend(void* contents,
   size_t chunksize = size * nmemb;
   size_t datasize = response->size + chunksize + 1;
   if (datasize > MAX_RESPONSE_SIZE) {
-    rcl_error("too big response, size: %zu, chunksize: %zu\n", response->size, chunksize);
+    rcl_error("too big response, size: %zu, chunksize: %zu\n", response->size,
+              chunksize);
     return 0;
   }
 
@@ -230,10 +236,6 @@ static int req_parse(req_t* req, vector_t* logs) {
       goto error;
     }
 
-    if (log->block_number == 0) {
-      rcl_debug("strange request: %s\n", req->buffer);
-    }
-
     json_t* address = json_object_get(item, "address");
     if (json_is_string(address)) {
       hex2bin(log->address, json_string_value(address), sizeof(rcl_address_t));
@@ -315,18 +317,6 @@ static int req_process_segment(rcl_upstream_t* self,
 
   curl_multi_remove_handle(multi, handle);
 
-  double total;
-  if (curl_easy_getinfo(handle, CURLINFO_TOTAL_TIME, &total) != CURLE_OK) {
-    rcl_error("couldn't get total time for %zu\n", idx);
-    return -1;
-  }
-
-  long http;
-  if (curl_easy_getinfo(handle, CURLINFO_HTTP_VERSION, &http) != CURLE_OK) {
-    rcl_error("couldn't get http version\n");
-    return -1;
-  }
-
   uint64_t code = 0;
   if (curl_easy_getinfo(handle, CURLINFO_RESPONSE_CODE, &code) != CURLE_OK) {
     rcl_error("couldn't get response code\n");
@@ -337,13 +327,6 @@ static int req_process_segment(rcl_upstream_t* self,
     rcl_error("server responded with code %ld\n", code);
     return -1;
   }
-
-  rcl_debug(
-      "req %d | successfully loaded,"
-      "%zu bytes,"
-      "total time = %.3lf sec,"
-      "http version = %zu\n",
-      req->id, req->size, total, http);
 
   req->ended = true;
 
@@ -387,13 +370,10 @@ static int req_next(rcl_upstream_t* self) {
     curl_easy_setopt(handle, CURLOPT_WRITEFUNCTION, req_onsend);
 
     curl_multi_add_handle(self->multi_handle, handle);
-
-    rcl_debug("req %d | start: from %zu, to %zu\n", req->id, req->from,
-              req->to);
   };
 
   // run all requests
-  for (int still_running = 1; still_running;) {
+  for (int still_running = 1; !self->closed && still_running;) {
     CURLMcode mc = curl_multi_perform(self->multi_handle, &still_running);
 
     if (still_running)
@@ -404,7 +384,10 @@ static int req_next(rcl_upstream_t* self) {
   }
 
   int msgs_left, rc;
-  for (CURLMsg* msg; (msg = curl_multi_info_read(self->multi_handle, &msgs_left));) {
+  for (CURLMsg* msg; !self->closed;) {
+    msg = curl_multi_info_read(self->multi_handle, &msgs_left);
+    if (!msg) break;
+
     switch (msg->msg) {
       case CURLMSG_DONE:
         if ((rc = req_process_segment(self, msg, self->multi_handle)) != 0)
@@ -417,20 +400,18 @@ static int req_next(rcl_upstream_t* self) {
     }
   }
 
+  if (self->closed) return 0;
+
   for (size_t i = 0; i < used; ++i) {
     req_t* req = vector_at(&(self->requests), i);
     vector_reset(&(req->logs));
 
     if (req_parse(req, &(req->logs)) != 0) {
-      rcl_debug("request: %s\n", req->payload);
-      rcl_debug("response: %s\n", req->buffer);
       return -1;
     }
 
-    rcl_debug("req %d | successfully parsed %" PRId64 " logs\n", req->id,
-              req->logs.size);
-
-    vector_sort(&(req->logs), logscomp);  // TODO: create a sorted array in place
+    vector_sort(&(req->logs),
+                logscomp);  // TODO: create a sorted array in place
 
     int rc = self->callback(&(req->logs), self->callback_data);
     if (rc != 0) {
@@ -453,12 +434,13 @@ static void* rcl_fetcher_thread(void* data) {
 
   rcl_debug("start fetcher thread\n");
 
-  while (self->height == 0 || self->url == NULL) {
-    rcl_debug("wait height and URL...\n");
-    sleep(1);
-  }
-
   while (!self->closed) {
+    if (self->height == 0 || self->url == NULL) {
+      rcl_debug("wait height and URL...\n");
+      sleep(1);
+      continue;
+    }
+
     if (self->last >= self->height) {
       rcl_debug("nothing to download, height: %zu, last: %zu\n", self->height,
                 self->last);

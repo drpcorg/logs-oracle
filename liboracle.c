@@ -363,9 +363,9 @@ rcl_result rcl_open(char* dir, uint64_t ram_limit, rcl_t** db_ptr) {
 
 void rcl_free(rcl_t* db) {
   // Clear db
-  pthread_rwlock_wrlock(&(db->lock));
-
   rcl_upstream_free(&(db->upstream));
+
+  pthread_rwlock_wrlock(&(db->lock));
 
   rcl_result _ = rcl_state_write(db);
   fclose(db->manifest);
@@ -395,8 +395,9 @@ void rcl_free(rcl_t* db) {
 rcl_result rcl_update_height(rcl_t* db, uint64_t height) {
   rcl_result result = RCL_SUCCESS;
 
-  pthread_rwlock_wrlock(&(db->lock));
   rcl_upstream_set_height(&(db->upstream), height);
+
+  pthread_rwlock_wrlock(&(db->lock));
   result = rcl_state_write(db);
   pthread_rwlock_unlock(&(db->lock));
 

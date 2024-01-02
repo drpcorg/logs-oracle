@@ -35,16 +35,13 @@ type Node struct {
 	client *ethclient.Client
 }
 
-func CreateNode(ctx context.Context, addr string) (*Node, error) {
+func NewNode(ctx context.Context, addr string) (*Node, error) {
 	eth, err := ethclient.DialContext(ctx, addr)
 	if err != nil {
 		return nil, fmt.Errorf("Couln't connect to node: %w", err)
 	}
 
-	node := &Node{
-		client: eth,
-	}
-
+	node := &Node{ client: eth }
 	if err := node.UpdateHead(ctx); err != nil {
 		return nil, err
 	}

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"math/big"
@@ -17,56 +16,55 @@ import (
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+	"github.com/kelseyhightower/envconfig"
 
 	liboracle "github.com/p2p-org/drpc-logs-oracle"
 )
 
-type App struct {
-	Config *Config
-	Node   *Node
-	Db     *liboracle.Conn
+type Config struct {
+	Env         string `default:"production"`
+	BindPort    int    `default:"8000"`
+	MetricsPort int    `default:"8001"`
+
+	DataDir  string `required:"true"`
+	RamLimit uint64  `default:"0"` // bytes
+
+	NodeRPC  string `required:"true"`
+	NodeWS   string `required:"true"`
 }
 
-func CreateApp(ctx context.Context) (*App, error) {
-	config, err := LoadConfig()
-	if err != nil {
-		return nil, fmt.Errorf("Couldn't parse config: %w", err)
-	}
-
-	db_conn, err := liboracle.NewDB(config.DataDir, uint64(config.RamLimit))
-	if err != nil {
-		return nil, fmt.Errorf("Couldn't load db: %w", err)
-	}
-
-	node, err := CreateNode(ctx, config.NodeWS)
-	if err != nil {
-		return nil, err
-	}
-
-	app := &App{
-		Config: &config,
-		Node:   node,
-		Db:     db_conn,
-	}
-	return app, nil
+func NewConfig() (*Config, error) {
+	var config Config
+	err := envconfig.Process("oracle", &config)
+	return &config, err
 }
 
-func (app *App) Close() {
-	app.Db.Close()
-	app.Node.Close()
+func (c *Config) IsDev() bool {
+	return c.Env == "development"
 }
 
-func initLogger(dev bool) {
+func runBackground(ctx context.Context, wg sync.WaitGroup) {
+}
+
+func main() {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Prepare env
+	flag.Parse()
+
+	config, err := NewConfig()
+	if err != nil {
+		panic(err)
+	}
+
 	var logger zerolog.Logger
-
-	if dev {
+	if config.IsDev() {
 		logger = zerolog.New(zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.RFC3339}).
 			Level(zerolog.DebugLevel).
 			With().Timestamp().Caller().Int("pid", os.Getpid()).
 			Logger()
 	} else {
 		zerolog.TimeFieldFormat = time.RFC3339Nano
-
 		logger = zerolog.New(os.Stdout).
 			Level(zerolog.InfoLevel).
 			With().Timestamp().Caller().
@@ -75,36 +73,35 @@ func initLogger(dev bool) {
 
 	log.Logger = logger
 	zerolog.DefaultContextLogger = &logger
-}
 
-func main() {
-	wg := sync.WaitGroup{}
-	ctx, cancel := context.WithCancel(context.Background())
-
-	// Prepare env
-	flag.Parse()
-
-	app, err := CreateApp(ctx)
+	db, err := liboracle.NewDB(config.DataDir, config.RamLimit)
 	if err != nil {
-		panic(err.Error())
+		log.Panic().Err(err).Msg("couldn't load db")
 	}
-	defer app.Close()
+	defer db.Close()
 
-	initLogger(app.Config.IsDev())
+	node, err := NewNode(ctx, config.NodeWS)
+	if err != nil {
+		log.Panic().Err(err).Msg("couldn't connect to node")
+	}
+	defer node.Close()
 
-	// Background
-	app.Db.SetUpstream(app.Config.NodeRPC)
+	// run
+	wg := sync.WaitGroup{}
+
 	go func() {
 		wg.Add(1)
 		defer wg.Done()
 
+		db.SetUpstream(config.NodeRPC)
+
 		headch := make(chan *big.Int)
-		go app.Node.SubscribeNewHead(ctx, &wg, headch)
+		go node.SubscribeNewHead(ctx, &wg, headch)
 
 		for {
 			select {
 			case data := <-headch:
-				if err := app.Db.UpdateHeight(data.Uint64()); err != nil {
+				if err := db.UpdateHeight(data.Uint64()); err != nil {
 					log.Error().Err(err).Msg("couldn't update height in db")
 					return
 				} else {
@@ -117,98 +114,44 @@ func main() {
 		}
 	}()
 
-	// Metrics server
-	metrics := echo.New()
-	metrics.HidePort = true
-	metrics.HideBanner = true
-
-	metrics.GET("/metrics", echoprometheus.NewHandler())
-
+	app := echo.New()
 	go func() {
 		wg.Add(1)
 		defer wg.Done()
 
-		if err := metrics.Start(fmt.Sprintf(":%d", app.Config.MetricsPort)); err != nil {
-			if errors.Is(err, http.ErrServerClosed) {
-				log.Debug().Msg("metrics server / shutdowned")
-			} else {
-				log.Error().Err(err).Msg("metrics server / failed")
+		app.Debug = config.IsDev()
+		app.HidePort = true
+		app.HideBanner = true
+
+		app.Use(middleware.Recover())
+		app.Use(middleware.Decompress())
+		app.Use(echoprometheus.NewMiddleware("oracle"))
+
+		app.POST("/rpc", func(c echo.Context) error {
+			return handleHttp(c, node, db)
+		})
+
+		if err := app.Start(fmt.Sprintf(":%d", config.BindPort)); err != nil {
+			if err != http.ErrServerClosed {
+				log.Error().Err(err).Msg("rpc server failed")
 			}
 		}
 	}()
 
-	// RPC Server
-	e := echo.New()
-
-	e.Debug = app.Config.IsDev()
-	e.HidePort = true
-	e.HideBanner = true
-
-	e.Use(middleware.Recover())
-	e.Use(middleware.Decompress())
-	e.Use(echoprometheus.NewMiddleware("oracle"))
-
-	if app.Config.AccessLog {
-		e.Use(middleware.RequestLoggerWithConfig(middleware.RequestLoggerConfig{
-			HandleError: true,
-
-			LogLatency:   true,
-			LogProtocol:  true,
-			LogRemoteIP:  true,
-			LogHost:      true,
-			LogMethod:    true,
-			LogURI:       true,
-			LogRequestID: true,
-			LogStatus:    true,
-			LogError:     true,
-
-			LogValuesFunc: func(c echo.Context, v middleware.RequestLoggerValues) error {
-				var clog *zerolog.Event
-				if v.Error == nil {
-					clog = log.Info()
-				} else {
-					clog = log.Error().Err(v.Error)
-				}
-
-				clog.
-					Str("latency", v.Latency.String()).
-					Str("protocol", v.Protocol).
-					Str("remote_ip", v.RemoteIP).
-					Str("host", v.Host).
-					Str("method", v.Method).
-					Str("uri", v.URI).
-					Str("request_id", v.RequestID).
-					Int("status", v.Status).
-					Msg("@@accesslog@@")
-
-				return nil
-			},
-		}))
-	}
-
-	e.GET("/status", func(c echo.Context) error {
-		blocks, _ := app.Db.GetBlocksCount()
-		logs, _ := app.Db.GetLogsCount()
-
-		return c.String(http.StatusOK, fmt.Sprintf(
-			"blocks_count: %d\nlogs_count:  %d\n",
-			blocks,
-			logs,
-		))
-	})
-	e.POST("/rpc", func(c echo.Context) error {
-		return handleHttp(c, app)
-	})
-
+	metrics := echo.New()
 	go func() {
 		wg.Add(1)
 		defer wg.Done()
 
-		if err := e.Start(fmt.Sprintf(":%d", app.Config.BindPort)); err != nil {
-			if err == http.ErrServerClosed {
-				log.Debug().Msg("rpc server / shutdowned")
-			} else {
-				log.Error().Err(err).Msg("rpc server / failed")
+		metrics.Debug = config.IsDev()
+		metrics.HidePort = true
+		metrics.HideBanner = true
+
+		metrics.GET("/metrics", echoprometheus.NewHandler())
+
+		if err := metrics.Start(fmt.Sprintf(":%d", config.MetricsPort)); err != nil {
+			if err != http.ErrServerClosed {
+				log.Error().Err(err).Msg("metrics server failed")
 			}
 		}
 	}()
@@ -218,24 +161,22 @@ func main() {
 	signal.Notify(quit, os.Interrupt)
 	<-quit
 
-	go func() {
-		time.Sleep(60 * time.Second)
-		os.Exit(1) // force exit after timeout
-	}()
+	log.Info().Msg("received a interrupt signal")
 
-	cancel() // notifying everyone about the shutdown
-
-	if err := e.Shutdown(ctx); err != nil { // wait rpc server
+	if err := app.Shutdown(ctx); err != nil { // wait rpc server
 		log.Error().Err(err).Msg("couldn't shutdown rpc server")
+	} else {
+		log.Info().Msg("rpc server stopped")
 	}
 
 	if err := metrics.Shutdown(ctx); err != nil { // wait metrics server
 		log.Error().Err(err).Msg("couldn't shutdown metrics server")
+	} else {
+		log.Info().Msg("metrics server stopped")
 	}
 
+	cancel() // notifying everyone about the shutdown
 	wg.Wait() // wait background workers
-
-	log.Info().Msg("server stopped")
 }
 
 type Filter struct {
@@ -363,7 +304,7 @@ func CreateResponseError(message string) Response {
 	return Response{Error: &message}
 }
 
-func handleHttp(c echo.Context, app *App) error {
+func handleHttp(c echo.Context, node *Node, db *liboracle.Conn) error {
 	ctx := c.Request().Context()
 	log := zerolog.Ctx(ctx)
 
@@ -377,13 +318,13 @@ func handleHttp(c echo.Context, app *App) error {
 		return c.JSON(http.StatusBadRequest, CreateResponseError("too many arguments, want at most 1"))
 	}
 
-	query, err := filters[0].ToQuery(app.Node)
+	query, err := filters[0].ToQuery(node)
 	if err != nil {
 		log.Error().Err(err).Msg("Couldn't convert request to internal filter")
 		return c.JSON(http.StatusInternalServerError, CreateResponseError(err.Error()))
 	}
 
-	result, err := app.Db.Query(query)
+	result, err := db.Query(query)
 	if err != nil {
 		log.Error().Err(err).Msg("Couldn't query in db")
 		return c.JSON(http.StatusInternalServerError, CreateResponseError("internal server error"))

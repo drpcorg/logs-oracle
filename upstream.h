@@ -22,20 +22,19 @@ typedef struct {
 typedef int (*rcl_upstream_callback_t)(vector_t* logs, void* data);
 
 typedef struct {
-  CURLU* url;
-  uint64_t height, last;
-  bool closed;
+  atomic_bool   closed;
+  atomic_size_t height, last;
 
   rcl_upstream_callback_t callback;
   void* callback_data;
 
   pthread_t* thrd;
 
-  // curl internal state
-  vector_t handles;
-  vector_t requests;
-  CURLM* multi_handle;
+  _Atomic(CURLU*) url;
+  _Atomic(CURLM*) multi_handle;
   struct curl_slist* http_headers;
+  vector_t handles;  // CURL*
+  vector_t requests; // req_t
 } rcl_upstream_t;
 
 int rcl_upstream_init(rcl_upstream_t* self,
