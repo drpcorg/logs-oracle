@@ -1,18 +1,97 @@
 package org.drpc.logsoracle;
 
-import static java.lang.foreign.MemorySegment.NULL;
+import static java.lang.foreign.MemorySegment.*;
+import static java.lang.foreign.ValueLayout.*;
 
 import java.io.*;
 import java.lang.UnsupportedOperationException;
 import java.lang.foreign.*;
+import java.lang.invoke.MethodHandle;
+import java.lang.invoke.VarHandle;
 import java.net.URL;
+import java.nio.ByteOrder;
 import java.nio.file.*;
 import java.util.List;
 
-import static org.drpc.logsoracle.liboracle_h.*;
+class Constants {
+    static final int HASH_LENGTH = 32;
+    static final int ADDRESS_LENGTH = 20;
+    static final int TOPICS_LENGTH = 4;
+
+    static final OfBoolean C_BOOL_LAYOUT = JAVA_BOOLEAN;
+    static final OfByte C_CHAR_LAYOUT = JAVA_BYTE;
+    static final OfShort C_SHORT_LAYOUT = JAVA_SHORT;
+    static final OfInt C_INT_LAYOUT = JAVA_INT;
+    static final OfLong C_LONG_LAYOUT = JAVA_LONG;
+    static final OfLong C_LONG_LONG_LAYOUT = JAVA_LONG;
+    static final OfFloat C_FLOAT_LAYOUT = JAVA_FLOAT;
+    static final OfDouble C_DOUBLE_LAYOUT = JAVA_DOUBLE;
+    static final OfAddress C_POINTER_LAYOUT = ADDRESS.withBitAlignment(64).asUnbounded();
+}
+
+class rcl_query_address {
+    static final StructLayout LAYOUT =
+            MemoryLayout
+                    .structLayout(Constants.C_LONG_LONG_LAYOUT.withName("_hash"),
+                            MemoryLayout
+                                    .sequenceLayout(
+                                            Constants.ADDRESS_LENGTH, Constants.C_CHAR_LAYOUT)
+                                    .withName("_data"),
+                            MemoryLayout.paddingLayout(32),
+                            Constants.C_POINTER_LAYOUT.withName("encoded"))
+                    .withName("rcl_query_address");
+
+    static final VarHandle encoded_VH =
+            LAYOUT.varHandle(MemoryLayout.PathElement.groupElement("encoded"));
+}
+
+class rcl_query_topics {
+    static final StructLayout LAYOUT =
+            MemoryLayout
+                    .structLayout(Constants.C_LONG_LONG_LAYOUT.withName("_hash"),
+                            MemoryLayout
+                                    .sequenceLayout(Constants.HASH_LENGTH, Constants.C_CHAR_LAYOUT)
+                                    .withName("_data"),
+                            Constants.C_POINTER_LAYOUT.withName("encoded"))
+                    .withName("rcl_query_topics");
+
+    static final VarHandle encoded_VH =
+            LAYOUT.varHandle(MemoryLayout.PathElement.groupElement("encoded"));
+}
+
+class rcl_query_t {
+    static final StructLayout LAYOUT = MemoryLayout.structLayout(
+            Constants.C_LONG_LONG_LAYOUT.withName("from"),
+            Constants.C_LONG_LONG_LAYOUT.withName("to"),
+            Constants.C_LONG_LONG_LAYOUT.withName("alen"),
+            MemoryLayout.sequenceLayout(Constants.TOPICS_LENGTH, Constants.C_LONG_LONG_LAYOUT)
+                    .withName("tlen"),
+            Constants.C_BOOL_LAYOUT.withName("_has_addresses"),
+            Constants.C_BOOL_LAYOUT.withName("_has_topics"), MemoryLayout.paddingLayout(48),
+            Constants.C_POINTER_LAYOUT.withName("address"),
+            MemoryLayout.sequenceLayout(Constants.TOPICS_LENGTH, Constants.C_POINTER_LAYOUT)
+                    .withName("topics"));
+
+    static final VarHandle from_VH =
+            LAYOUT.varHandle(MemoryLayout.PathElement.groupElement("from"));
+    static final VarHandle to_VH = LAYOUT.varHandle(MemoryLayout.PathElement.groupElement("to"));
+    static final VarHandle alen_VH =
+            LAYOUT.varHandle(MemoryLayout.PathElement.groupElement("alen"));
+
+    public static MemorySegment tlen_slice(MemorySegment seg) {
+        return seg.asSlice(24, 32);
+    }
+
+    static final VarHandle address_VH =
+            LAYOUT.varHandle(MemoryLayout.PathElement.groupElement("address"));
+
+    public static MemorySegment topics_slice(MemorySegment seg) {
+        return seg.asSlice(72, 32);
+    }
+}
 
 public class LogsOracle implements AutoCloseable {
-    private Arena arena = Arena.openShared();
+    private Arena connArena = Arena.openShared();
     private MemorySegment connPtr;
 
     static {
@@ -53,102 +132,221 @@ public class LogsOracle implements AutoCloseable {
         }
     }
 
+    static final OfAddress C_POINTER = Constants.C_POINTER_LAYOUT;
+
+    static final int RCL_SUCCESS = 0;
+    static final int RCL_ERROR_MEMORY_ALLOCATION = 4;
+    static final int RCL_ERROR_UNKNOWN = 6;
+
+    private static final Linker LINKER = Linker.nativeLinker();
+    private static final SymbolLookup SYMBOL_LOOKUP;
+
+    static {
+        SymbolLookup loaderLookup = SymbolLookup.loaderLookup();
+        SYMBOL_LOOKUP = name -> loaderLookup.find(name).or(() -> LINKER.defaultLookup().find(name));
+    }
+
+    static MethodHandle downcallHandle(String name, FunctionDescriptor fdesc) {
+        return SYMBOL_LOOKUP.find(name)
+                .map(addr -> LINKER.downcallHandle(addr, fdesc))
+                .orElse(null);
+    }
+
+    static final MethodHandle rcl_open_MH = downcallHandle("rcl_open",
+        FunctionDescriptor.of(
+            Constants.C_INT_LAYOUT,
+            Constants.C_POINTER_LAYOUT,
+            Constants.C_LONG_LONG_LAYOUT,
+            Constants.C_POINTER_LAYOUT));
+    static final MethodHandle rcl_free_MH = downcallHandle("rcl_free",
+        FunctionDescriptor.ofVoid(
+            Constants.C_POINTER_LAYOUT));
+    static final MethodHandle rcl_update_height_MH = downcallHandle("rcl_update_height",
+        FunctionDescriptor.of(
+            Constants.C_INT_LAYOUT,
+            Constants.C_POINTER_LAYOUT,
+            Constants.C_LONG_LONG_LAYOUT));
+    static final MethodHandle rcl_set_upstream_MH = downcallHandle("rcl_set_upstream",
+        FunctionDescriptor.of(
+            Constants.C_INT_LAYOUT,
+            Constants.C_POINTER_LAYOUT,
+            Constants.C_POINTER_LAYOUT));
+    static final MethodHandle rcl_query_MH = downcallHandle("rcl_query",
+        FunctionDescriptor.of(
+            Constants.C_INT_LAYOUT,
+            Constants.C_POINTER_LAYOUT,
+            Constants.C_POINTER_LAYOUT,
+            Constants.C_POINTER_LAYOUT));
+    static final MethodHandle rcl_query_alloc_MH = downcallHandle("rcl_query_alloc",
+        FunctionDescriptor.of(
+            Constants.C_INT_LAYOUT,
+            Constants.C_POINTER_LAYOUT,
+            Constants.C_LONG_LONG_LAYOUT,
+            Constants.C_POINTER_LAYOUT));
+    static final MethodHandle rcl_query_free_MH = downcallHandle("rcl_query_free",
+        FunctionDescriptor.ofVoid(
+            Constants.C_POINTER_LAYOUT));
+    static final MethodHandle rcl_logs_count_MH = downcallHandle("rcl_logs_count",
+        FunctionDescriptor.of(
+            Constants.C_INT_LAYOUT,
+            Constants.C_POINTER_LAYOUT,
+            Constants.C_POINTER_LAYOUT));
+    static final MethodHandle rcl_blocks_count_MH = downcallHandle("rcl_blocks_count",
+        FunctionDescriptor.of(
+            Constants.C_INT_LAYOUT,
+            Constants.C_POINTER_LAYOUT,
+            Constants.C_POINTER_LAYOUT));
+
     public LogsOracle(String dir, long ram_limit) throws Exception {
-        var dbPtr = arena.allocate(C_POINTER);
-        int rc = rcl_open(arena.allocateUtf8String(dir), 0L, dbPtr);
-        if (rc != RCL_SUCCESS()) {
-            throw new Exception("liboracle connection failed");
-        } else {
-            connPtr = dbPtr.get(C_POINTER, 0);
+        try (Arena arena = Arena.openConfined()) {
+            var dbPtr = connArena.allocate(C_POINTER);
+
+            int rc;
+            try {
+                rc = (int) rcl_open_MH.invokeExact(connArena.allocateUtf8String(dir), ram_limit, dbPtr);
+            } catch (Throwable ex) {
+                throw new AssertionError("should not reach here", ex);
+            }
+
+            if (rc != RCL_SUCCESS) {
+                throw new Exception("liboracle connection failed");
+            } else {
+                connPtr = dbPtr.get(C_POINTER, 0);
+            }
         }
     }
 
-    public void UpdateHeight(Long height) throws Exception {
-        int rc = rcl_update_height(connPtr, height);
-        if (rc != RCL_SUCCESS()) {
-            throw new Exception("liboracle failed");
+    public void UpdateHeight(long height) throws Exception {
+        try (Arena arena = Arena.openConfined()) {
+            int rc;
+            try {
+                rc = (int) rcl_update_height_MH.invokeExact(connPtr, height);
+            } catch (Throwable ex) {
+                throw new AssertionError("should not reach here", ex);
+            }
+
+            if (rc != RCL_SUCCESS)
+                throw new Exception("liboracle failed");
         }
     }
 
     public void SetUpstream(String upstream) throws Exception {
-        int rc = rcl_set_upstream(connPtr, arena.allocateUtf8String(upstream));
-        if (rc != RCL_SUCCESS()) {
-            throw new Exception("liboracle connection failed");
+        try (Arena arena = Arena.openConfined()) {
+            int rc;
+            try {
+                rc = (int) rcl_set_upstream_MH.invokeExact(connPtr, arena.allocateUtf8String(upstream));
+            } catch (Throwable ex) {
+                throw new AssertionError("should not reach here", ex);
+            }
+
+            if (rc != RCL_SUCCESS)
+                throw new Exception("liboracle connection failed");
         }
     }
 
-    public long Query(
-        Long fromBlock,
-        Long toBlock,
-        List<String> address,
-        List<List<String>> topics
-    ) throws Exception {
-        var ctlen = arena.allocateArray(ValueLayout.JAVA_LONG,
-            topics.size() > 0 ? topics.get(0).size() : 0,
-            topics.size() > 1 ? topics.get(1).size() : 0,
-            topics.size() > 2 ? topics.get(2).size() : 0,
-            topics.size() > 3 ? topics.get(3).size() : 0
-        );
+    public long Query(long fromBlock, long toBlock, List<String> address, List<List<String>> topics) throws Exception {
+        try (Arena arena = Arena.openConfined()) {
+            var query = arena.allocate(rcl_query_t.LAYOUT);
+            rcl_query_t.from_VH.set(query, fromBlock);
+            rcl_query_t.to_VH.set(query, toBlock);
 
-        var queryPtrPtr = arena.allocate(C_POINTER); // rcl_query_t**
-        int rc = rcl_query_alloc(queryPtrPtr, address.size(), ctlen);
-        if (rc != RCL_SUCCESS())
-            throw new Exception("liboracle: failed create query");
+            // address
+            long alen = address.size();
+            rcl_query_t.alen_VH.set(query, alen);
+            if (alen > 0) {
+                var addressPtr = arena.allocateArray(rcl_query_address.LAYOUT, alen);
+                for (int i = 0; i < alen; ++i) {
+                    var item = addressPtr.asSlice(i * rcl_query_address.LAYOUT.byteSize());
+                    rcl_query_address.encoded_VH.set(item, arena.allocateUtf8String(address.get(i)));
+                }
+                rcl_query_t.address_VH.set(query, addressPtr);
+            } else {
+                rcl_query_t.address_VH.set(query, NULL);
+            }
 
-        var queryPtr = queryPtrPtr.get(C_POINTER, 0); // rcl_query_t*
+            // topics
+            var tlenM = rcl_query_t.tlen_slice(query);
+            var topicsM = rcl_query_t.topics_slice(query);
 
-        rcl_query_t.from$set(queryPtr, fromBlock);
-        rcl_query_t.to$set(queryPtr, toBlock);
+            for (int i = 0; i < Constants.TOPICS_LENGTH; ++i) {
+                var topicM = topicsM.asSlice(i * Constants.C_POINTER_LAYOUT.byteSize());
+                var size = topics.size();
 
-        // address
-        var caddress = arena.allocateArray(rcl_query_address.$LAYOUT(), address.size());
-        for (long i = 0; i < address.size(); ++i) {
-            // var item = caddress.getAtIndex(rcl_query_address.$LAYOUT(), i);
+                if (size <= i) {
+                    topicM.set(Constants.C_POINTER_LAYOUT, 0, NULL);
+                    tlenM.set(ValueLayout.JAVA_LONG, i * ValueLayout.JAVA_LONG.byteSize(), 0L);
+                } else {
+                    var current = topics.get(i);
+                    var topicPtr = arena.allocateArray(rcl_query_topics.LAYOUT, current.size());
+
+                    for (int j = 0; j < current.size(); ++j) {
+                        var item = topicPtr.asSlice(j * rcl_query_topics.LAYOUT.byteSize());
+                        rcl_query_topics.encoded_VH.set(item, arena.allocateUtf8String(current.get(j)));
+                    }
+
+                    topicM.set(Constants.C_POINTER_LAYOUT, 0, topicPtr);
+                    tlenM.set(ValueLayout.JAVA_LONG, i * ValueLayout.JAVA_LONG.byteSize(), topics.get(i).size());
+                }
+            }
+
+            // call
+            var result = arena.allocate(C_POINTER);
+
+            int rc;
+            try {
+                rc = (int) rcl_query_MH.invokeExact(connPtr, query, result);
+            } catch (Throwable ex) {
+                throw new AssertionError("should not reach here", ex);
+            }
+            if (rc != RCL_SUCCESS)
+            throw new Exception("liboracle: failed perform query");
+
+            return result.get(ValueLayout.JAVA_LONG, 0);
         }
-
-        rcl_query_t.alen$set(queryPtr, address.size());
-        rcl_query_t.address$set(queryPtr, caddress);
-
-        // topics
-        // var ctlen = rcl_query_t.topics$slice(queryPtr);
-
-        // call
-        var result = arena.allocate(C_POINTER);
-        rc = rcl_query(connPtr, queryPtr, result);
-        if (rc != RCL_SUCCESS())
-            throw new Exception("liboracle: failed query");
-
-        return result.get(ValueLayout.JAVA_LONG, 0);
-    }
-
-    public void Insert() throws Exception {
-        // TODO: rcl_insert(connPtr);
-        throw new UnsupportedOperationException();
     }
 
     public long GetLogsCount() throws Exception {
-        var result = arena.allocate(C_POINTER);
+        try (Arena arena = Arena.openConfined()) {
+            var result = arena.allocate(C_POINTER);
 
-        int rc = rcl_logs_count(connPtr, result);
-        if (rc != RCL_SUCCESS())
+            int rc;
+            try {
+                rc = (int) rcl_logs_count_MH.invokeExact(connPtr, result);
+            } catch (Throwable ex) {
+                throw new AssertionError("should not reach here", ex);
+            }
+            if (rc != RCL_SUCCESS)
             throw new Exception("liboracle failed");
 
-        return result.get(ValueLayout.JAVA_LONG, 0);
+            return result.get(ValueLayout.JAVA_LONG, 0);
+        }
     }
 
     public long GetBlocksCount() throws Exception {
-        var result = arena.allocate(C_POINTER);
+        try (Arena arena = Arena.openConfined()) {
+            var result = arena.allocate(C_POINTER);
 
-        int rc = rcl_blocks_count(connPtr, result);
-        if (rc != RCL_SUCCESS())
+            int rc;
+            try {
+                rc = (int) rcl_blocks_count_MH.invokeExact(connPtr, result);
+            } catch (Throwable ex) {
+                throw new AssertionError("should not reach here", ex);
+            }
+
+            if (rc != RCL_SUCCESS)
             throw new Exception("liboracle failed");
 
-        return result.get(ValueLayout.JAVA_LONG, 0);
+            return result.get(ValueLayout.JAVA_LONG, 0);
+        }
     }
 
     @Override
     public void close() throws IOException {
-        rcl_free(connPtr);
-        arena.close();
+        try {
+            rcl_free_MH.invokeExact(connPtr);
+        } catch (Throwable ex) {
+            throw new AssertionError("should not reach here", ex);
+        }
+        connArena.close();
     }
 }

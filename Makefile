@@ -63,7 +63,6 @@ doracle-dev: doracle-build
 .PHONY: java-example jextract
 
 JAVA_SRC=$(wildcard java/org/drpc/logsoracle/*.java)
-JAVA_CLASS=$(patsubst %.java,%.class,$(JAVA_SRC))
 
 jextract:
 	jextract -t org.drpc.logsoracle @java/jextract-includes.txt --source --output java ./liboracle.h
@@ -71,7 +70,7 @@ jextract:
 java/LogsOracle.jar: $(JAVA_SRC)
 	javac --source=20 --enable-preview $(JAVA_SRC:%='%')
 	cd java && \
-		jar cf $(@:java/%=%) $(JAVA_CLASS:java/%='%')
+		jar cf $(@:java/%=%) org/drpc/logsoracle/*.class
 
 java-example: liboracle.so java/LogsOracle.jar
 	cp liboracle.so liboracle-$(shell uname -m)-linux.so
@@ -87,7 +86,7 @@ clean:
 
 format:
 	go fmt ./...
-	clang-format -style=Chromium -i $$(find -type f -regex '.*\.\(h\|c\)')
+	clang-format -style=Chromium -i $$(find -type f -regex '.*\.\(h\|c\|java\)')
 
 lint:
 	clang-tidy *.c -- $(CFLAGS)
