@@ -7,8 +7,8 @@ import (
 	"unsafe"
 )
 
-// #cgo CFLAGS: -std=gnu11 -pthread
-// #cgo pkg-config: libcurl jansson
+// #cgo CFLAGS: -std=gnu11 -pthread -fno-omit-frame-pointer
+// #cgo pkg-config: libcurl libcjson
 // #include "liboracle.h"
 /*
 void _add_address_to_query(rcl_query_t* query, _GoString_* strs) {

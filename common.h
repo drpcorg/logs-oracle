@@ -21,8 +21,8 @@
 #include <time.h>
 #include <unistd.h>
 
+#include <cjson/cJSON.h>
 #include <curl/curl.h>
-#include <jansson.h>
 
 #if defined _WIN32 || defined __CYGWIN__
 #define rcl_export __declspec(dllexport)
@@ -30,6 +30,14 @@
 #define rcl_export __attribute__((visibility("default")))
 #else
 #define rcl_export
+#endif
+
+#ifdef __GNUC__  // GCC, Clang, ICC
+#define rcl_unreachable() (__builtin_unreachable())
+#elifdef _MSC_VER  // MSVC
+#define rcl_unreachable() (__assume(false))
+#else
+#error "required 'unreachable' implementation"
 #endif
 
 #define max(a, b)           \

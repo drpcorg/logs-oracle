@@ -4,9 +4,10 @@
 #include "common.h"
 #include "vector.h"
 
-#define CA_CACHE_TIMEOUT 604800L
 #define TEXT_BUFFER_SIZE 256L
-#define MAX_RESPONSE_SIZE (1024 * 1024 * 512)  // 512MB
+
+#define MAX_RESPONSE_BYTES (1024 * 1024 * 512)  // 512MB
+#define MAX_RESPONSE_JSON_TOKENS 1024
 
 enum { HASH_LENGTH = 32, ADDRESS_LENGTH = 20, TOPICS_LENGTH = 4 };
 
@@ -22,7 +23,7 @@ typedef struct {
 typedef int (*rcl_upstream_callback_t)(vector_t* logs, void* data);
 
 typedef struct {
-  atomic_bool   closed;
+  atomic_bool closed;
   atomic_size_t height, last;
 
   rcl_upstream_callback_t callback;
@@ -33,8 +34,9 @@ typedef struct {
   _Atomic(CURLU*) url;
   _Atomic(CURLM*) multi_handle;
   struct curl_slist* http_headers;
-  vector_t handles;  // CURL*
-  vector_t requests; // req_t
+
+  int requests_head;
+  vector_t requests;  // req_t
 } rcl_upstream_t;
 
 int rcl_upstream_init(rcl_upstream_t* self,

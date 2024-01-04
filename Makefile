@@ -1,10 +1,10 @@
 CFLAGS+=-std=gnu11 -mtune=generic -pipe -pthread
 
-CFLAGS+=$(shell pkg-config --cflags libcurl jansson)
-LDFLAGS+=$(shell pkg-config --libs libcurl jansson)
+CFLAGS+=$(shell pkg-config --cflags libcurl libcjson)
+LDFLAGS+=$(shell pkg-config --libs libcurl libcjson)
 
 CWARN=-Wall -Wextra -Wpedantic -Wnull-dereference -Wvla -Wshadow\
-			-Wstrict-prototypes -Wwrite-strings -Wfloat-equal -Wconversion -Wdouble-promotion
+      -Wstrict-prototypes -Wwrite-strings -Wfloat-equal -Wconversion -Wdouble-promotion
 
 DEBUG=
 
@@ -51,11 +51,11 @@ libtest: $(SRC) $(HDR) $(TESTS)
 # Doracle (go wrapper server)
 .PHONY: doracle-build doracle-dev
 
+doracle-build: export CGO_CFLAGS=$(CFLAGS)
+doracle-build: export CGO_LDFLAGS=$(LDFLAGS)
 doracle-build:
 	cd doracle && go build -gcflags "all=-N -l" .
 
-doracle-dev: export CGO_CFLAGS=$(CFLAGS)
-doracle-dev: export CGO_LDFLAGS=$(LDFLAGS)
 doracle-dev: doracle-build
 	./doracle/doracle
 

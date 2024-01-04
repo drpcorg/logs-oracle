@@ -71,15 +71,20 @@ uint32_t xorshift32(void) {
   return randseed = x;
 }
 
+rcl_inline uint8_t ch2int(const char ch) {
+  if (ch >= '0' && ch <= '9')
+    return ch - '0';
+  if (ch >= 'a' && ch <= 'z')
+    return ch - 'a' + 10;
+  if (ch >= 'A' && ch <= 'Z')
+    return ch - 'A' + 10;
+  return 0;  // well, ignore it
+}
+
 int hex2bin(uint8_t* b, const char* str, int bytes) {
-  unsigned int tmp;
-
-  str += 2;  // skip '0x' prefix
-  for (int i = 0; i < bytes; ++i) {
-    sscanf(str + i * 2, "%02X", &tmp);
-    b[i] = (uint8_t)tmp;
-  }
-
+  const char* ptr = str + 2;  // skip '0x' prefix
+  for (int i = 0; i < bytes; ++i, ptr += 2)
+    b[i] = ch2int(ptr[0]) * 16 + ch2int(ptr[1]);
   return 0;
 }
 

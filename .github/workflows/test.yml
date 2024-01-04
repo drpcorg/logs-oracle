@@ -43,12 +43,12 @@ jobs:
           sudo apt update
           sudo apt-get install -y \
             gcc-12 clang-15 \
-            libjansson-dev libcurl4-openssl-dev libcriterion-dev
+            libcjson-dev libcurl4-openssl-dev libcriterion-dev
 
       - name: Install dependencies for Mac
         if: matrix.os == 'macos-latest'
         run: |
-          brew install gcc@12 llvm@15 criterion curl jansson
+          brew install gcc@12 llvm@15 criterion curl cjson
 
           ln -s "$(brew --prefix llvm@15)/bin/clang-format" "/usr/local/bin/clang-format"
           ln -s "$(brew --prefix llvm@15)/bin/clang-tidy" "/usr/local/bin/clang-tidy"
