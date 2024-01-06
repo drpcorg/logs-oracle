@@ -36,11 +36,11 @@ vector_t make_uint64_vector(size_t n, ...) {
   va_start(args, n);
 
   vector_t v;
-  vector_init(&v, n, sizeof(uint64_t));
+  vector_init(&v, n, sizeof(int64_t));
 
   for (size_t i = 0; i < n; ++i) {
-    uint64_t* it = (uint64_t*)vector_add(&v);
-    *it = va_arg(args, uint64_t);
+    int64_t* it = (int64_t*)vector_add(&v);
+    *it = va_arg(args, int64_t);
   }
 
   va_end(args);
@@ -80,7 +80,7 @@ static const char* topics[] = {
 };
 
 // Wrappers
-rcl_log_t ml(uint64_t number,
+rcl_log_t ml(int64_t number,
              const char* addr,
              const char* t1,
              const char* t2,
@@ -145,7 +145,7 @@ rcl_t* db_make_filled(void) {
   rcl_result err = rcl_insert(db, sizeof(s) / sizeof(s[0]), s);
   cr_expect(err == RCLE_OK, "Expected sucessfull insert");
 
-  uint64_t blocks;
+  int64_t blocks;
   rcl_result result = rcl_blocks_count(db, &blocks);
   cr_expect(result == RCLE_OK && blocks == 7,
             "Expected 7 logs after insert test suite");
@@ -153,9 +153,9 @@ rcl_t* db_make_filled(void) {
   return db;
 }
 
-uint64_t db_make_query(rcl_t* db,
-                       uint64_t from,
-                       uint64_t to,
+int64_t db_make_query(rcl_t* db,
+                       int64_t from,
+                       int64_t to,
                        vector_t ad,
                        vector_t tpcs[TOPICS_LENGTH]) {
   size_t tlen[TOPICS_LENGTH] = {0};
@@ -170,7 +170,7 @@ uint64_t db_make_query(rcl_t* db,
   q->to = to;
 
   for (size_t i = 0; i < ad.size; ++i) {
-    size_t k = *(uint64_t*)vector_at(&ad, i);
+    size_t k = *(int64_t*)vector_at(&ad, i);
     q->address[i].encoded = addresses[k];
   }
 
@@ -179,13 +179,13 @@ uint64_t db_make_query(rcl_t* db,
       continue;
 
     for (size_t j = 0; j < tpcs[i].size; ++j) {
-      uint64_t k = *(uint64_t*)vector_at(&tpcs[i], j);
+      int64_t k = *(int64_t*)vector_at(&tpcs[i], j);
       q->topics[i][j].encoded = topics[k];
     }
   }
 
   // Exec query
-  uint64_t actual;
+  int64_t actual;
   rcl_result result = rcl_query(db, q, &actual);
   cr_expect(result == RCLE_OK, "Expected sucessful query");
 
@@ -209,11 +209,11 @@ uint64_t db_make_query(rcl_t* db,
 Test(liboracle, New) {
   rcl_t* db = db_make();
 
-  uint64_t logs;
+  int64_t logs;
   rcl_result r1 = rcl_logs_count(db, &logs);
   cr_expect(r1 == RCLE_OK && logs == 0, "Expected 0 blocks in new DB");
 
-  uint64_t blocks;
+  int64_t blocks;
   rcl_result r2 = rcl_blocks_count(db, &blocks);
   cr_expect(r2 == RCLE_OK && blocks == 0, "Expected 0 logs in new DB");
 
@@ -227,7 +227,7 @@ Test(liboracle, EmptyInsert) {
   rcl_result err = rcl_insert(db, 0, NULL);
   cr_expect(err == RCLE_OK, "Expected sucessfull insert");
 
-  uint64_t blocks;
+  int64_t blocks;
   rcl_result r = rcl_blocks_count(db, &blocks);
   cr_expect(r == RCLE_OK && blocks == 0, "Expected 0 logs in new DB");
 

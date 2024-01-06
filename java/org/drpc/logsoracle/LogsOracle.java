@@ -19,6 +19,15 @@ class Constants {
     static final int TOPICS_LENGTH = 4;
 
     static final int RCLE_OK = 0;
+    static final int RCLE_QUERY_OVERFLOW = 1;
+    static final int RCLE_INVALID_DATADIR = 2;
+    static final int RCLE_INVALID_UPSTREAM = 3;
+    static final int RCLE_TOO_LARGE_QUERY = 4;
+    static final int RCLE_NODE_REQUEST = 5;
+    static final int RCLE_OUT_OF_MEMORY = 6;
+    static final int RCLE_FILESYSTEM = 7;
+    static final int RCLE_LIBCURL = 8;
+    static final int RCLE_UNKNOWN = 9;
 
     static final OfBoolean C_BOOL_LAYOUT = JAVA_BOOLEAN;
     static final OfByte C_CHAR_LAYOUT = JAVA_BYTE;
@@ -32,30 +41,23 @@ class Constants {
 }
 
 class rcl_query_address {
-    static final StructLayout LAYOUT =
-            MemoryLayout
-                    .structLayout(Constants.C_LONG_LONG_LAYOUT.withName("_hash"),
-                            MemoryLayout
-                                    .sequenceLayout(
-                                            Constants.ADDRESS_LENGTH, Constants.C_CHAR_LAYOUT)
-                                    .withName("_data"),
-                            MemoryLayout.paddingLayout(32),
-                            Constants.C_POINTER_LAYOUT.withName("encoded"))
-                    .withName("rcl_query_address");
+    static final StructLayout LAYOUT = MemoryLayout.structLayout(
+        Constants.C_POINTER_LAYOUT.withName("encoded"),
+        Constants.C_LONG_LONG_LAYOUT.withName("_hash"),
+        MemoryLayout.sequenceLayout(20, Constants.C_CHAR_LAYOUT).withName("_data"),
+        MemoryLayout.paddingLayout(32)
+    ).withName("rcl_query_address");
 
     static final VarHandle encoded_VH =
             LAYOUT.varHandle(MemoryLayout.PathElement.groupElement("encoded"));
 }
 
 class rcl_query_topics {
-    static final StructLayout LAYOUT =
-            MemoryLayout
-                    .structLayout(Constants.C_LONG_LONG_LAYOUT.withName("_hash"),
-                            MemoryLayout
-                                    .sequenceLayout(Constants.HASH_LENGTH, Constants.C_CHAR_LAYOUT)
-                                    .withName("_data"),
-                            Constants.C_POINTER_LAYOUT.withName("encoded"))
-                    .withName("rcl_query_topics");
+    static final StructLayout LAYOUT = MemoryLayout.structLayout(
+        Constants.C_POINTER_LAYOUT.withName("encoded"),
+        Constants.C_LONG_LONG_LAYOUT.withName("_hash"),
+        MemoryLayout.sequenceLayout(32, Constants.C_CHAR_LAYOUT).withName("_data")
+    ).withName("rcl_query_topics");
 
     static final VarHandle encoded_VH =
             LAYOUT.varHandle(MemoryLayout.PathElement.groupElement("encoded"));
@@ -63,32 +65,34 @@ class rcl_query_topics {
 
 class rcl_query_t {
     static final StructLayout LAYOUT = MemoryLayout.structLayout(
-            Constants.C_LONG_LONG_LAYOUT.withName("from"),
-            Constants.C_LONG_LONG_LAYOUT.withName("to"),
-            Constants.C_LONG_LONG_LAYOUT.withName("alen"),
-            MemoryLayout.sequenceLayout(Constants.TOPICS_LENGTH, Constants.C_LONG_LONG_LAYOUT)
-                    .withName("tlen"),
-            Constants.C_BOOL_LAYOUT.withName("_has_addresses"),
-            Constants.C_BOOL_LAYOUT.withName("_has_topics"), MemoryLayout.paddingLayout(48),
-            Constants.C_POINTER_LAYOUT.withName("address"),
-            MemoryLayout.sequenceLayout(Constants.TOPICS_LENGTH, Constants.C_POINTER_LAYOUT)
-                    .withName("topics"));
+        Constants.C_POINTER_LAYOUT.withName("address"),
+        MemoryLayout.sequenceLayout(Constants.TOPICS_LENGTH, Constants.C_POINTER_LAYOUT).withName("topics"),
+        Constants.C_LONG_LONG_LAYOUT.withName("from"),
+        Constants.C_LONG_LONG_LAYOUT.withName("to"),
+        Constants.C_LONG_LONG_LAYOUT.withName("limit"),
+        Constants.C_LONG_LONG_LAYOUT.withName("alen"),
+        MemoryLayout.sequenceLayout(Constants.TOPICS_LENGTH, Constants.C_LONG_LONG_LAYOUT).withName("tlen"),
+        Constants.C_BOOL_LAYOUT, Constants.C_BOOL_LAYOUT, // _has_addresses, _has_topics
+        MemoryLayout.paddingLayout(48)
+    );
 
     static final VarHandle from_VH =
             LAYOUT.varHandle(MemoryLayout.PathElement.groupElement("from"));
     static final VarHandle to_VH = LAYOUT.varHandle(MemoryLayout.PathElement.groupElement("to"));
+    static final VarHandle limit_VH = LAYOUT.varHandle(MemoryLayout.PathElement.groupElement("limit"));
+
     static final VarHandle alen_VH =
             LAYOUT.varHandle(MemoryLayout.PathElement.groupElement("alen"));
 
     public static MemorySegment tlen_slice(MemorySegment seg) {
-        return seg.asSlice(24, 32);
+        return seg.asSlice(72, 32);
     }
 
     static final VarHandle address_VH =
             LAYOUT.varHandle(MemoryLayout.PathElement.groupElement("address"));
 
     public static MemorySegment topics_slice(MemorySegment seg) {
-        return seg.asSlice(72, 32);
+        return seg.asSlice(8, 32);
     }
 }
 
@@ -190,7 +194,7 @@ public class LogsOracle implements AutoCloseable {
 
     public LogsOracle(String dir, long ram_limit) throws LogsOracleException {
         try (Arena arena = Arena.openConfined()) {
-            var dbPtr = connArena.allocate(Contants.C_POINTER_LAYOUT);
+            var dbPtr = connArena.allocate(Constants.C_POINTER_LAYOUT);
 
             int rc;
             try {
@@ -203,7 +207,7 @@ public class LogsOracle implements AutoCloseable {
                 throw exception(rc);
             }
 
-            connPtr = dbPtr.get(Contants.C_POINTER_LAYOUT, 0);
+            connPtr = dbPtr.get(Constants.C_POINTER_LAYOUT, 0);
         }
     }
 
@@ -235,11 +239,18 @@ public class LogsOracle implements AutoCloseable {
         }
     }
 
-    public long Query(long fromBlock, long toBlock, List<String> address, List<List<String>> topics) throws LogsOracleException {
+    public long Query(
+        Long limit,
+        long fromBlock, long toBlock,
+        List<String> address,
+        List<List<String>> topics
+    ) throws LogsOracleException {
         try (Arena arena = Arena.openConfined()) {
             var query = arena.allocate(rcl_query_t.LAYOUT);
+
             rcl_query_t.from_VH.set(query, fromBlock);
             rcl_query_t.to_VH.set(query, toBlock);
+            rcl_query_t.limit_VH.set(query, limit == null ? -1L : limit.longValue());
 
             // address
             long alen = address.size();
@@ -260,8 +271,8 @@ public class LogsOracle implements AutoCloseable {
             var topicsM = rcl_query_t.topics_slice(query);
 
             for (int i = 0; i < Constants.TOPICS_LENGTH; ++i) {
-                var topicM = topicsM.asSlice(i * Constants.C_POINTER_LAYOUT.byteSize());
                 var size = topics.size();
+                var topicM = topicsM.asSlice(i * Constants.C_POINTER_LAYOUT.byteSize());
 
                 if (size <= i) {
                     topicM.set(Constants.C_POINTER_LAYOUT, 0, NULL);
@@ -281,7 +292,7 @@ public class LogsOracle implements AutoCloseable {
             }
 
             // call
-            var result = arena.allocate(Contants.C_POINTER_LAYOUT);
+            var result = arena.allocate(Constants.C_POINTER_LAYOUT);
 
             int rc;
             try {
@@ -298,7 +309,7 @@ public class LogsOracle implements AutoCloseable {
 
     public long GetLogsCount() throws LogsOracleException {
         try (Arena arena = Arena.openConfined()) {
-            var result = arena.allocate(Contants.C_POINTER_LAYOUT);
+            var result = arena.allocate(Constants.C_POINTER_LAYOUT);
 
             int rc;
             try {
@@ -315,7 +326,7 @@ public class LogsOracle implements AutoCloseable {
 
     public long GetBlocksCount() throws LogsOracleException {
         try (Arena arena = Arena.openConfined()) {
-            var result = arena.allocate(Contants.C_POINTER_LAYOUT);
+            var result = arena.allocate(Constants.C_POINTER_LAYOUT);
 
             int rc;
             try {
@@ -344,15 +355,22 @@ public class LogsOracle implements AutoCloseable {
     LogsOracleException exception(int code) {
         try {
             MemorySegment error = (MemorySegment)rcl_strerror_MH.invokeExact(code);
-            return new LogsOracleException(error.getUtf8String(0));
+            return new LogsOracleException(code, error.getUtf8String(0));
         } catch (Throwable ex) {
             throw new AssertionError("should not reach here", ex);
         }
     }
 
-    class LogsOracleException extends Exception {
-        public LogsOracleException(String s) {
+    public class LogsOracleException extends Exception {
+        private int code;
+
+        public LogsOracleException(int code, String s) {
             super("liboracle error: " + s);
+            this.code = code;
+        }
+
+        public boolean isQueryOverflow() {
+            return code == Constants.RCLE_QUERY_OVERFLOW;
         }
     }
 }

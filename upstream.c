@@ -489,8 +489,8 @@ static rcl_result rcl_upstream_process(rcl_upstream_t* self, bool exact) {
         if (req->to > self->last)
           self->last = req->to;
 
-        rcl_debug("added %zu logs from: %zu to %zu, last: %zu, height: %zu\n",
-                  req->logs.size, req->from, req->to, self->last, self->height);
+        // rcl_debug("added %zu logs from: %zu to %zu, last: %zu, height: %zu\n",
+        //           req->logs.size, req->from, req->to, self->last, self->height);
 
         break;
 

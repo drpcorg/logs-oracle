@@ -3,9 +3,12 @@
 
 #include "common.h"
 
+// there is a copy in LogsOracle.java
 typedef enum {
   RCLE_OK = 0,
 
+  RCLE_QUERY_OVERFLOW,
+  RCLE_INVALID_DATADIR,
   RCLE_INVALID_UPSTREAM,
   RCLE_TOO_LARGE_QUERY,
   RCLE_NODE_REQUEST,

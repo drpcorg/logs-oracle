@@ -75,7 +75,7 @@ java/LogsOracle.jar: $(JAVA_SRC)
 java-example: liboracle.so java/LogsOracle.jar
 	cp liboracle.so liboracle-$(shell uname -m)-linux.so
 	jar uf java/LogsOracle.jar liboracle-$(shell uname -m)-linux.so
-	java --source=20 --enable-preview -cp ".:java/LogsOracle.jar" java/Example.java
+	mkdir -p _data && java --source=20 --enable-preview -cp ".:java/LogsOracle.jar" java/Example.java
 
 # Utils
 .PHONY: clean format lint

@@ -4,6 +4,10 @@ const char* rcl_strerror(rcl_result value) {
   switch (value) {
     case RCLE_OK:
       return "ok";
+    case RCLE_QUERY_OVERFLOW:
+      return "there are more logs in the request than the limit";
+    case RCLE_INVALID_DATADIR:
+      return "wrong path to data dir";
     case RCLE_INVALID_UPSTREAM:
       return "invalid upstream";
     case RCLE_TOO_LARGE_QUERY:

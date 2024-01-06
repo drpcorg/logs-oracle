@@ -22,8 +22,9 @@ void _add_topics_to_query(rcl_query_t* query, size_t j, _GoString_* strs) {
 import "C"
 
 type Query struct { // see rcl_query_t
-	FromBlock uint64
-	ToBlock   uint64
+	Limit     *int64
+	FromBlock int64
+	ToBlock   int64
 	Addresses []string
 	Topics    [][]string
 }
@@ -40,12 +41,12 @@ func rcl_error(code C.rcl_result) error {
 	return fmt.Errorf("liboracle error: " + C.GoString(C.rcl_strerror(code)))
 }
 
-func NewDB(data_dir string, ram_limit uint64) (*Conn, error) {
+func NewDB(data_dir string, ram_limit int64) (*Conn, error) {
 	data_dir_cstr := C.CString(data_dir)
 	defer C.free(unsafe.Pointer(data_dir_cstr))
 
 	var db *C.rcl_t
-	rc := C.rcl_open(data_dir_cstr, C.uint64_t(ram_limit), &db)
+	rc := C.rcl_open(data_dir_cstr, C.int64_t(ram_limit), &db)
 
 	return &Conn{db: db}, rcl_error(rc)
 }
@@ -54,8 +55,8 @@ func (conn *Conn) Close() {
 	C.rcl_free(conn.db)
 }
 
-func (conn *Conn) UpdateHeight(height uint64) error {
-	rc := C.rcl_update_height(conn.db, C.uint64_t(height))
+func (conn *Conn) UpdateHeight(height int64) error {
+	rc := C.rcl_update_height(conn.db, C.int64_t(height))
 	return rcl_error(rc)
 }
 
@@ -67,17 +68,16 @@ func (conn *Conn) SetUpstream(upstream string) error {
 	return rcl_error(rc)
 }
 
-func (conn *Conn) Query(query *Query) (uint64, error) {
+func (conn *Conn) Query(query *Query) (int64, error) {
 	var pinner runtime.Pinner
 	pinner.Pin(query)
 	defer pinner.Unpin()
-
-	tlen := [4]C.size_t{0}
 
 	if len(query.Topics) > len(query.Topics) {
 		return 0, fmt.Errorf("too many topics")
 	}
 
+	tlen := [C.TOPICS_LENGTH]C.size_t{0}
 	for i := 0; i < len(query.Topics); i++ {
 		tlen[i] = C.size_t(len(query.Topics[i]))
 	}
@@ -93,8 +93,14 @@ func (conn *Conn) Query(query *Query) (uint64, error) {
 	}
 	defer C.rcl_query_free(cquery)
 
-	cquery.from = C.uint64_t(query.FromBlock)
-	cquery.to = C.uint64_t(query.ToBlock)
+	cquery.from = C.int64_t(query.FromBlock)
+	cquery.to = C.int64_t(query.ToBlock)
+
+	if query.Limit != nil {
+		cquery.limit = C.int64_t(*(query.Limit))
+	} else {
+		cquery.limit = C.int64_t(-1)
+	}
 
 	if len(query.Addresses) > 0 {
 		C._add_address_to_query(cquery, &(query.Addresses[0]))
@@ -106,19 +112,19 @@ func (conn *Conn) Query(query *Query) (uint64, error) {
 		}
 	}
 
-	var count C.uint64_t
+	var count C.int64_t
 	rc = C.rcl_query(conn.db, (*C.rcl_query_t)(unsafe.Pointer(cquery)), &count)
-	return uint64(count), rcl_error(rc)
+	return int64(count), rcl_error(rc)
 }
 
-func (conn *Conn) GetLogsCount() (uint64, error) {
-	var result C.uint64_t
+func (conn *Conn) GetLogsCount() (int64, error) {
+	var result C.int64_t
 	rc := C.rcl_logs_count(conn.db, &result)
-	return uint64(result), rcl_error(rc)
+	return int64(result), rcl_error(rc)
 }
 
-func (conn *Conn) GetBlocksCount() (uint64, error) {
-	var result C.uint64_t
+func (conn *Conn) GetBlocksCount() (int64, error) {
+	var result C.int64_t
 	rc := C.rcl_blocks_count(conn.db, &result)
-	return uint64(result), rcl_error(rc)
+	return int64(result), rcl_error(rc)
 }
