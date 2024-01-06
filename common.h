@@ -40,6 +40,66 @@
 #error "required 'unreachable' implementation"
 #endif
 
+#define rcl_inline static inline __attribute__((always_inline))
+
+#define rcl_expect(c, x) __builtin_expect((long)(x), (c))
+#define rcl_unlikely(x) rcl_expect(0, x)
+#define rcl_likely(x) rcl_expect(1, x)
+
+#define rcl_pointer_to(p, off) ((void*)((char*)(p) + (off)))
+
+#define rcl_memcpy(dst, src, length) (void)memcpy(dst, src, (size_t)(length))
+#define rcl_memmove(dst, src, length) (void)memmove(dst, src, (size_t)(length))
+
+// Logs
+#if defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 199901)
+#define CURRENT_FUNC __func__
+#else
+#define CURRENT_FUNC "(unknown)"
+#endif
+
+#define rcl_perror(s)                                                          \
+  do {                                                                         \
+    fprintf(stderr, "ERR [%s:%d -> %s]:\t", __FILE__, __LINE__, CURRENT_FUNC); \
+    perror(s);                                                                 \
+    fflush(stderr);                                                            \
+  } while (false)
+
+#define rcl_error(...)                                                         \
+  do {                                                                         \
+    fprintf(stderr, "ERR [%s:%d -> %s]:\t", __FILE__, __LINE__, CURRENT_FUNC); \
+    fprintf(stderr, __VA_ARGS__);                                              \
+    fflush(stderr);                                                            \
+  } while (false)
+
+#ifdef DEBUG
+#define rcl_debug(...)                                                         \
+  do {                                                                         \
+    fprintf(stderr, "DBG [%s:%d -> %s]:\t", __FILE__, __LINE__, CURRENT_FUNC); \
+    fprintf(stderr, __VA_ARGS__);                                              \
+    fflush(stderr);                                                            \
+  } while (false)
+#else
+#define rcl_debug(...) do {} while (false)
+#endif
+
+#define return_err(code, ...) do { exit_code = code; rcl_error(__VA_ARGS__); goto exit; } while(false);
+
+// bloom filter
+enum { LOGS_BLOOM_SIZE = 256 };
+
+typedef uint8_t bloom_t[LOGS_BLOOM_SIZE];
+
+#define bloom_init(bloom) memset(bloom, 0, sizeof(bloom_t));
+
+void bloom_add(bloom_t* bloom, uint8_t* hash);
+bool bloom_check(bloom_t* bloom, uint8_t* hash);
+
+// Utils
+int hex2bin(uint8_t* b, const char* str, int bytes);
+
+uint64_t murmur64A(const void* key, const uint64_t len, const uint32_t seed);
+
 #define max(a, b)           \
   ({                        \
     __typeof__(a) _a = (a); \
@@ -53,72 +113,5 @@
     __typeof__(b) _b = (b); \
     _a < _b ? _a : _b;      \
   })
-
-#define rcl_inline static inline __attribute__((always_inline))
-
-#define rcl_expect(c, x) __builtin_expect((long)(x), (c))
-#define rcl_unlikely(x) rcl_expect(0, x)
-#define rcl_likely(x) rcl_expect(1, x)
-
-#define rcl_pointer_to(p, off) ((void*)((char*)(p) + (off)))
-
-#define rcl_memcpy(dst, src, length) (void)memcpy(dst, src, (size_t)(length))
-#define rcl_memmove(dst, src, length) (void)memmove(dst, src, (size_t)(length))
-
-#if defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 199901)
-#define CURRENT_FUNC __func__
-#else
-#define CURRENT_FUNC "(unknown)"
-#endif
-
-#ifdef DEBUG
-#define rcl_debug(...)                                                         \
-  do {                                                                         \
-    fprintf(stderr, "DBG [%s:%d -> %s]:\t", __FILE__, __LINE__, CURRENT_FUNC); \
-    fprintf(stderr, __VA_ARGS__);                                              \
-    fflush(stderr);                                                            \
-  } while (false)
-#else
-#define rcl_debug(...) \
-  do {                 \
-  } while (false)
-#endif
-
-#define rcl_error(...)                                                         \
-  do {                                                                         \
-    fprintf(stderr, "ERR [%s:%d -> %s]:\t", __FILE__, __LINE__, CURRENT_FUNC); \
-    fprintf(stderr, __VA_ARGS__);                                              \
-    fflush(stderr);                                                            \
-  } while (false)
-
-// Utils
-enum {
-  MAX_FILE_LENGTH = PATH_MAX,
-};
-typedef char rcl_filepath_t[MAX_FILE_LENGTH + 1];
-
-rcl_inline bool includes(uint64_t key, uint64_t* arr, size_t size) {
-  while (size-- > 0)
-    if (arr[size] == key)
-      return true;
-
-  return false;
-}
-
-int hex2bin(uint8_t* b, const char* str, int bytes);
-
-uint64_t murmur64A(const void* key, const uint64_t len, const uint32_t seed);
-
-uint32_t xorshift32(void);
-
-// bloom filter
-enum { LOGS_BLOOM_SIZE = 256 };
-
-typedef uint8_t bloom_t[LOGS_BLOOM_SIZE];
-
-#define bloom_init(bloom) memset(bloom, 0, sizeof(bloom_t));
-
-void bloom_add(bloom_t* bloom, uint8_t* hash);
-bool bloom_check(bloom_t* bloom, uint8_t* hash);
 
 #endif  // _RCL_COMMON_H

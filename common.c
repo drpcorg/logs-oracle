@@ -57,20 +57,6 @@ uint64_t murmur64A(const void* key, const uint64_t len, const uint32_t seed) {
   return h;
 }
 
-uint32_t xorshift32(void) {
-  static uint32_t randseed = 0;
-  if (randseed == 0)
-    randseed = (uint32_t)time(NULL);
-
-  uint32_t x = randseed;
-
-  x ^= x << 13;
-  x ^= x >> 7;
-  x ^= x << 17;
-
-  return randseed = x;
-}
-
 rcl_inline uint8_t ch2int(const char ch) {
   if (ch >= '0' && ch <= '9')
     return ch - '0';

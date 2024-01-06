@@ -13,6 +13,7 @@ Checks: >
     bugprone-signed-char-misuse,
     bugprone-sizeof-expression,
     bugprone-branch-clone,
+    bugprone-unused-return-value,
     -clang-analyzer-security.insecureAPI.*,
     -misc-no-recursion,
 

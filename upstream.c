@@ -1,9 +1,29 @@
 #include "upstream.h"
-#include <cjson/cJSON.h>
+#include "common.h"
+#include "err.h"
 
 enum {
   CONNECTIONS_COUNT = 32,
   BLOCKS_REQUEST_BATCH = 128,
+
+  REQUEST_BUFFER_SIZE = 256,
+  RESPONSE_BUFFER_SIZE = (1024 * 1024 * 512)  // 512MB
+};
+
+struct rcl_upstream {
+  atomic_bool closed;
+  atomic_size_t height, last;
+
+  rcl_upstream_callback_t callback;
+  void* callback_data;
+
+  pthread_t* thrd;
+
+  _Atomic(CURLU*) url;
+  struct curl_slist* http_headers;
+
+  int requests_head;
+  vector_t requests;  // req_t
 };
 
 enum req_state { available, sent, received };
@@ -16,7 +36,7 @@ typedef struct {
   CURL* handle;
 
   size_t response_size;
-  char request[TEXT_BUFFER_SIZE + 1], *response;
+  char request[REQUEST_BUFFER_SIZE + 1], *response;
 
   vector_t logs;  // rcl_log_t
 } req_t;
@@ -31,12 +51,20 @@ static size_t req_onsend(void* contents,
   (req_t*)vector_at(&((self)->requests), \
                     ((self)->requests_head + (i)) % CONNECTIONS_COUNT)
 
-int rcl_upstream_init(rcl_upstream_t* self,
-                      uint64_t last,
-                      rcl_upstream_callback_t callback,
-                      void* callback_data) {
+rcl_result rcl_upstream_init(rcl_upstream_t** ptr,
+                             uint64_t last,
+                             rcl_upstream_callback_t callback,
+                             void* callback_data) {
   srand(time(NULL));
   curl_global_init(CURL_GLOBAL_DEFAULT);
+
+  rcl_upstream_t* self = malloc(sizeof(rcl_upstream_t));
+  if (self == NULL) {
+    rcl_perror("alloc memory for upstream");
+    return RCLE_OUT_OF_MEMORY;
+  }
+
+  *ptr = self;
 
   self->url = NULL;
   self->last = last;
@@ -48,7 +76,6 @@ int rcl_upstream_init(rcl_upstream_t* self,
 
   self->thrd = NULL;
 
-  self->multi_handle = curl_multi_init();
   self->http_headers = NULL;
   self->http_headers =
       curl_slist_append(self->http_headers, "Accept: application/json");
@@ -69,10 +96,10 @@ int rcl_upstream_init(rcl_upstream_t* self,
     vector_init(&(req->logs), 16, sizeof(rcl_log_t));
 
     if ((req->handle = curl_easy_init()) == NULL)
-      return -1;
+      return RCLE_UNKNOWN;
   }
 
-  return 0;
+  return RCLE_OK;
 }
 
 void rcl_upstream_free(rcl_upstream_t* self) {
@@ -86,9 +113,6 @@ void rcl_upstream_free(rcl_upstream_t* self) {
   }
 
   // clear
-  if (self->multi_handle)
-    curl_multi_cleanup(self->multi_handle);
-
   for (size_t i = 0; i < CONNECTIONS_COUNT; ++i) {
     req_t* req = vector_at(&(self->requests), i);
     if (req->response)
@@ -105,25 +129,31 @@ void rcl_upstream_free(rcl_upstream_t* self) {
   if (self->http_headers)
     curl_slist_free_all(self->http_headers);
 
+  free(self);
+
   curl_global_cleanup();
 }
 
-void rcl_upstream_set_height(rcl_upstream_t* self, uint64_t height) {
+rcl_result rcl_upstream_set_height(rcl_upstream_t* self, uint64_t height) {
   self->height = height;
+  return RCLE_OK;
 }
 
-int rcl_upstream_set_url(rcl_upstream_t* self, const char* url) {
+rcl_result rcl_upstream_set_url(rcl_upstream_t* self, const char* url) {
   if (self->url == NULL)
     self->url = curl_url();
 
   int rc = curl_url_set(self->url, CURLUPART_URL, url, 0);
-  if (rc != CURLUE_OK)
-    return -1;
+  if (rc != CURLUE_OK) {
+    rcl_perror("malloc upstream thread");
+    return RCLE_INVALID_UPSTREAM;
+  }
 
   if (self->thrd == NULL) {
     self->thrd = malloc(sizeof(pthread_t));
     if (self->thrd == NULL) {
-      return -1;
+      rcl_error("url error: %s\n", curl_url_strerror(rc));
+      return RCLE_OUT_OF_MEMORY;
     }
 
     pthread_attr_t attr;
@@ -132,7 +162,7 @@ int rcl_upstream_set_url(rcl_upstream_t* self, const char* url) {
     pthread_create(self->thrd, &attr, rcl_upstream_thrd, self);
   }
 
-  return 0;
+  return RCLE_OK;
 }
 
 #define BODY                                                      \
@@ -148,7 +178,7 @@ static size_t req_onsend(void* contents,
 
   size_t chunksize = size * nmemb;
   size_t datasize = req->response_size + chunksize + 1;
-  if (datasize > MAX_RESPONSE_BYTES) {
+  if (datasize > RESPONSE_BUFFER_SIZE) {
     rcl_error("too big response, size: %zu, chunksize: %zu\n",
               req->response_size, chunksize);
     return 0;
@@ -157,7 +187,7 @@ static size_t req_onsend(void* contents,
   // TODO: allocate memory in blocks of multiples of the page size
   req->response = realloc(req->response, req->response_size + chunksize + 1);
   if (!req->response) {
-    rcl_error("not enough memory\n");
+    rcl_perror("realloc buffer for response");
     return 0;
   }
 
@@ -168,21 +198,21 @@ static size_t req_onsend(void* contents,
   return chunksize;
 }
 
-static int req_parse(req_t* req, vector_t* logs) {
+static rcl_result req_parse(req_t* req, vector_t* logs) {
+  rcl_result exit_code = RCLE_OK;
+
   cJSON* root = cJSON_ParseWithLength(req->response, req->response_size);
   if (root == NULL) {
     const char* error_ptr = cJSON_GetErrorPtr();
     if (error_ptr == NULL)
       error_ptr = "unrecognized";
 
-    rcl_error("couldn't parse req, error: %s, req: %.*s\n", error_ptr,
-              req->response_size, req->response);
-    return -1;
+    return_err(RCLE_NODE_REQUEST, "couldn't parse requset, error: %s, req: %.*s\n", error_ptr,
+             (int)req->response_size, req->response);
   }
 
   if (rcl_unlikely(!cJSON_IsObject(root))) {
-    rcl_error("root is not an object\n");
-    goto error;
+    return_err(RCLE_NODE_REQUEST, "root is not an object\n");
   }
 
   const cJSON* error = cJSON_GetObjectItemCaseSensitive(root, "error");
@@ -200,26 +230,24 @@ static int req_parse(req_t* req, vector_t* logs) {
       rcl_error("RPC error: unrecognized\n");
     }
 
-    goto error;
+    exit_code = RCLE_NODE_REQUEST;
+    goto exit;
   }
 
   const cJSON* rid = cJSON_GetObjectItemCaseSensitive(root, "id");
   if (rcl_unlikely(!cJSON_IsNumber(rid))) {
-    rcl_error("'id' is not an integer\n");
-    goto error;
+    return_err(RCLE_NODE_REQUEST, "'id' is not an integer\n");
   }
 
   const cJSON* result = cJSON_GetObjectItemCaseSensitive(root, "result");
   if (rcl_unlikely(!cJSON_IsArray(result))) {
-    rcl_error("result is not an array\n");
-    goto error;
+    return_err(RCLE_NODE_REQUEST, "result is not an array\n");
   }
 
   const cJSON* item = NULL;
   cJSON_ArrayForEach(item, result) {
     if (rcl_unlikely(!cJSON_IsObject(item))) {
-      rcl_error("logs item is not object\n");
-      goto error;
+      return_err(RCLE_NODE_REQUEST, "logs item is not object\n");
     }
 
     rcl_log_t* log = (rcl_log_t*)vector_add(logs);
@@ -228,8 +256,7 @@ static int req_parse(req_t* req, vector_t* logs) {
         cJSON_GetObjectItemCaseSensitive(item, "blockNumber");
     if (rcl_unlikely(!cJSON_IsString(block_number) ||
                      block_number->valuestring == NULL)) {
-      rcl_error("logs item, block_number is not a string\n");
-      goto error;
+      return_err(RCLE_NODE_REQUEST, "logs item, block_number is not a string\n");
     }
 
     const char* start = block_number->valuestring;
@@ -238,29 +265,25 @@ static int req_parse(req_t* req, vector_t* logs) {
     errno = 0;
     log->block_number = (uint64_t)strtoll(start, &end, 16);
     if (rcl_unlikely(errno == ERANGE)) {
-      rcl_error("logs item, block_number range error\n");
-      goto error;
+      return_err(RCLE_NODE_REQUEST, "logs item, block_number range error\n");
     }
 
     const cJSON* address = cJSON_GetObjectItemCaseSensitive(item, "address");
     if (rcl_unlikely(!cJSON_IsString(address) ||
                      address->valuestring == NULL)) {
-      rcl_error("logs item, address is not a string\n");
-      goto error;
+      return_err(RCLE_NODE_REQUEST, "logs item, address is not a string\n");
     }
 
     hex2bin(log->address, address->valuestring, sizeof(rcl_address_t));
 
     const cJSON* topics = cJSON_GetObjectItemCaseSensitive(item, "topics");
     if (rcl_unlikely(!cJSON_IsArray(topics))) {
-      rcl_error("item, topics is not an array\n");
-      goto error;
+      return_err(RCLE_NODE_REQUEST, "item, topics is not an array\n");
     }
 
     size_t topics_size = cJSON_GetArraySize(topics);
     if (rcl_unlikely(topics_size > TOPICS_LENGTH)) {
-      rcl_error("logs item, too many topics\n");
-      goto error;
+      return_err(RCLE_NODE_REQUEST, "logs item, too many topics\n");
     }
 
     memset(log->topics, 0, sizeof(rcl_hash_t) * TOPICS_LENGTH);
@@ -269,21 +292,18 @@ static int req_parse(req_t* req, vector_t* logs) {
     const cJSON* topic = NULL;
     cJSON_ArrayForEach(topic, topics) {
       if (rcl_unlikely(!cJSON_IsString(topic) || topic->valuestring == NULL)) {
-        rcl_error("item, %zu topic is not a string\n", j);
-        goto error;
+        return_err(RCLE_NODE_REQUEST, "item, %zu topic is not a string\n", j);
       }
 
       hex2bin(log->topics[j++], topic->valuestring, sizeof(rcl_hash_t));
     }
   }
 
-  cJSON_Delete(root);
-  return 0;
-
-error:
+exit:
   if (root)
     cJSON_Delete(root);
-  return -1;
+
+  return exit_code;
 }
 
 static int logscomp(const void* d1, const void* d2) {
@@ -295,11 +315,11 @@ static int logscomp(const void* d1, const void* d2) {
   return 0;
 }
 
-static int req_process(rcl_upstream_t* self, CURLMsg* msg) {
+static rcl_result req_process(rcl_upstream_t* self, CURLM* multi, CURLMsg* msg) {
   if (rcl_unlikely(msg->data.result != CURLE_OK)) {
     rcl_error("curl_perform failed: %s\n",
               curl_easy_strerror(msg->data.result));
-    return -1;
+    return RCLE_LIBCURL;
   }
 
   req_t* req = NULL;
@@ -313,39 +333,40 @@ static int req_process(rcl_upstream_t* self, CURLMsg* msg) {
 
   if (rcl_unlikely(req == NULL)) {
     rcl_error("easy_handle not found\n");
-    return -1;
+    return RCLE_UNKNOWN;
   }
 
-  curl_multi_remove_handle(self->multi_handle, req->handle);
+  curl_multi_remove_handle(multi, req->handle);
 
   long code = 0;
   if (curl_easy_getinfo(req->handle, CURLINFO_RESPONSE_CODE, &code) !=
       CURLE_OK) {
     rcl_error("couldn't get response code\n");
-    return -1;
+    return RCLE_LIBCURL;
   }
 
   if (code != 200) {
     rcl_error("server responded with code %ld\n", code);
-    return -1;
+    return RCLE_NODE_REQUEST;
   }
 
   vector_reset(&(req->logs));
 
-  if (req_parse(req, &(req->logs)) != 0) {
-    rcl_error("failed to parse the request\n");
-    return -1;
-  }
+  rcl_result rc = req_parse(req, &(req->logs));
+  if (rc != RCLE_OK)
+    return rc;
 
   // TODO: create a sorted array in place
   vector_sort(&(req->logs), logscomp);
 
   req->state = received;
 
-  return 0;
+  return RCLE_OK;
 }
 
-static int rcl_upstream_send(rcl_upstream_t* self, uint64_t* start) {
+static rcl_result rcl_upstream_send(rcl_upstream_t* self, CURLM* multi, uint64_t* start) {
+  int rc;
+
   size_t i = 0;
   for (; i < CONNECTIONS_COUNT; ++i) {
     if ((rcl_request_at(self, i))->state == available)
@@ -357,7 +378,7 @@ static int rcl_upstream_send(rcl_upstream_t* self, uint64_t* start) {
 
     if (req->state != available) {
       rcl_error("trying to send a request that has already been sent\n");
-      return -1;
+      return RCLE_UNKNOWN;
     }
 
     size_t count = min(BLOCKS_REQUEST_BATCH, self->height - *start);
@@ -370,87 +391,97 @@ static int rcl_upstream_send(rcl_upstream_t* self, uint64_t* start) {
 
     *start += count + 1;
 
-    if (i % 2 == 0) {
-      if (curl_easy_setopt(req->handle, CURLOPT_CURLU, self->url))
-        return -1;
-    } else {
-      if (curl_easy_setopt(req->handle, CURLOPT_CURLU, self->url))
-        return -1;
+    if ((rc = curl_easy_setopt(req->handle, CURLOPT_CURLU, self->url))) {
+      rcl_error("set url: %s\n", curl_url_strerror(rc));
+      return RCLE_LIBCURL;
     }
 
-    if (curl_easy_setopt(req->handle, CURLOPT_ACCEPT_ENCODING, ""))
-      return -1;
+    if ((rc = curl_easy_setopt(req->handle, CURLOPT_ACCEPT_ENCODING, ""))) {
+      rcl_error("set encoding: %s\n", curl_url_strerror(rc));
+      return RCLE_LIBCURL;
+    }
 
-    if (curl_easy_setopt(req->handle, CURLOPT_HTTPHEADER, self->http_headers))
-      return -1;
+    if ((rc = curl_easy_setopt(req->handle, CURLOPT_HTTPHEADER, self->http_headers))) {
+      rcl_error("set headers: %s\n", curl_url_strerror(rc));
+      return RCLE_LIBCURL;
+    }
 
-    snprintf(req->request, TEXT_BUFFER_SIZE, BODY, req->id, req->from, req->to);
-    if (curl_easy_setopt(req->handle, CURLOPT_POSTFIELDS, req->request))
-      return -1;
+    snprintf(req->request, REQUEST_BUFFER_SIZE, BODY, req->id, req->from,
+             req->to);
+    if ((rc = curl_easy_setopt(req->handle, CURLOPT_POSTFIELDS, req->request))) {
+      rcl_error("set body: %s\n", curl_url_strerror(rc));
+      return RCLE_LIBCURL;
+    }
 
-    if (curl_easy_setopt(req->handle, CURLOPT_POSTFIELDSIZE,
-                         strlen(req->request)))
-      return -1;
+    if ((rc = curl_easy_setopt(req->handle, CURLOPT_POSTFIELDSIZE,
+                         strlen(req->request)))) {
+      rcl_error("set body size: %s\n", curl_url_strerror(rc));
+      return RCLE_LIBCURL;
+    }
 
-    if (curl_easy_setopt(req->handle, CURLOPT_WRITEDATA, (void*)req))
-      return -1;
-    if (curl_easy_setopt(req->handle, CURLOPT_WRITEFUNCTION, req_onsend))
-      return -1;
+    if ((rc = curl_easy_setopt(req->handle, CURLOPT_WRITEDATA, (void*)req))) {
+      rcl_error("set write data: %s\n", curl_url_strerror(rc));
+      return RCLE_LIBCURL;
+    }
 
-    if (curl_multi_add_handle(self->multi_handle, req->handle))
-      return -1;
+    if ((rc = curl_easy_setopt(req->handle, CURLOPT_WRITEFUNCTION, req_onsend))) {
+      rcl_error("set write callback: %s\n", curl_url_strerror(rc));
+      return RCLE_LIBCURL;
+    }
+
+    if ((rc = curl_multi_add_handle(multi, req->handle))) {
+      rcl_error("add in multi_handle: %s\n", curl_url_strerror(rc));
+      return RCLE_LIBCURL;
+    }
   }
 
-  return 0;
+  return RCLE_OK;
 }
 
-static int rcl_upstream_receive(rcl_upstream_t* self) {
+static rcl_result rcl_upstream_receive(rcl_upstream_t* self, CURLM* multi) {
   int numfds;
   CURLMsg* msg;
 
-  while ((msg = curl_multi_info_read(self->multi_handle, &numfds))) {
+  while ((msg = curl_multi_info_read(multi, &numfds))) {
     if (self->closed)
       break;
 
+    rcl_result rc;
     switch (msg->msg) {
       case CURLMSG_DONE:
-        if (req_process(self, msg) != 0)
-          return -1;
+        if ((rc = req_process(self, multi, msg)))
+          return rc;
         break;
 
       default:
         rcl_error("invalid CURLMsg\n");
-        return -1;
+        return RCLE_LIBCURL;
     }
   }
 
-  return 0;
+  return RCLE_OK;
 }
 
-static int rcl_upstream_process(rcl_upstream_t* self, bool exact) {
-  int rc;
+static rcl_result rcl_upstream_process(rcl_upstream_t* self, bool exact) {
+  rcl_result rc;
 
   for (size_t i = 0; i < CONNECTIONS_COUNT && !self->closed; ++i) {
     req_t* req = vector_at(&(self->requests), self->requests_head);
 
     switch (req->state) {
       case available:
-        return 0;
+        return RCLE_OK;
 
       case sent:
         if (exact) {
           rcl_error("completed request not parsed\n");
-          return -1;
+          return RCLE_UNKNOWN;
         }
-
-        return 0;
+        return RCLE_OK;
 
       case received:
-        rc = self->callback(&(req->logs), self->callback_data);
-        if (rc != 0) {
-          rcl_error("couldn't insert logs, code: %d\n", rc);
-          return -1;
-        }
+        if ((rc = self->callback(&(req->logs), self->callback_data)))
+          return rc;
 
         req->state = available;
         self->requests_head = (self->requests_head + 1) % CONNECTIONS_COUNT;
@@ -465,55 +496,62 @@ static int rcl_upstream_process(rcl_upstream_t* self, bool exact) {
 
       default:
         rcl_error("invalid request state\n");
-        rcl_unreachable();
+        return RCLE_UNKNOWN;
     }
   }
 
-  return 0;
+  return RCLE_OK;
 }
 
-static int rcl_upstream_poll(rcl_upstream_t* self) {
-  uint64_t start = self->last == 0 ? 0 : self->last + 1;
+static rcl_result rcl_upstream_poll(rcl_upstream_t* self) {
+  rcl_result rc = 0;
 
-  int rc, still_running, numfds;
+  uint64_t start = self->last == 0 ? 0 : self->last + 1;
+  CURLM* multi_handle = curl_multi_init();
+  if (multi_handle == NULL)
+    return RCLE_LIBCURL;
+
+  int still_running, numfds;
   do {
     if (self->closed || start > self->height)
       break;
 
-    if ((rc = rcl_upstream_send(self, &start)) != 0) {
-      rcl_error("couldn't send requests, code: %d\n", rc);
-      return -1;
-    }
+    if ((rc = rcl_upstream_send(self, multi_handle, &start)))
+      goto exit;
 
-    CURLMcode mc = curl_multi_perform(self->multi_handle, &still_running);
+    CURLMcode mc = curl_multi_perform(multi_handle, &still_running);
     if (mc != CURLM_OK) {
       rcl_error("curl_multi_perform failed: '%s'\n", curl_multi_strerror(mc));
-      return -1;
+      rc = RCLE_LIBCURL;
+      goto exit;
     }
 
-    mc = curl_multi_poll(self->multi_handle, NULL, 0, 1000, &numfds);
+    mc = curl_multi_poll(multi_handle, NULL, 0, 1000, &numfds);
     if (mc != CURLM_OK) {
       rcl_error("curl_multi_pool failed: '%s'\n", curl_multi_strerror(mc));
-      return -1;
+      rc = RCLE_LIBCURL;
+      goto exit;
     }
 
-    if (rcl_upstream_receive(self) != 0)
-      return -1;
+    if ((rc = rcl_upstream_receive(self, multi_handle)))
+      goto exit;
 
-    if (rcl_upstream_process(self, false) != 0)
-      return -1;
+    if ((rc = rcl_upstream_process(self, false)))
+      goto exit;
   } while (still_running);
 
   if (self->closed)
-    return 0;
+    goto exit;
 
-  if (rcl_upstream_receive(self) != 0)
-    return -1;
+  if ((rc = rcl_upstream_receive(self, multi_handle)))
+    goto exit;
 
-  if (rcl_upstream_process(self, true) != 0)
-    return -1;
+  if ((rc = rcl_upstream_process(self, true)))
+    goto exit;
 
-  return 0;
+exit:
+  curl_multi_cleanup(multi_handle);
+  return rc;
 }
 
 static void* rcl_upstream_thrd(void* data) {
@@ -535,11 +573,9 @@ static void* rcl_upstream_thrd(void* data) {
       continue;
     }
 
-    int rc = rcl_upstream_poll(self);
-    if (rc != 0) {
-      // There are retrays inside the fetcher
-      // If there's a error, we take a break so we don't spam
-      rcl_debug("delay for loader after error...\n");
+    rcl_result rc = rcl_upstream_poll(self);
+    if (rc != RCLE_OK) {
+      rcl_error("failed perform upstream pool: %s\n", rcl_strerror(rc));
       sleep(5);
     }
   }

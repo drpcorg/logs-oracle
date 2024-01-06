@@ -1,14 +1,13 @@
 #include "liboracle.h"
 
-#include <stdint.h>
-#include <stdlib.h>
-#include <string.h>
 #include "common.h"
 #include "file.h"
 #include "upstream.h"
 #include "vector.h"
 
-enum { RCL_QUERY_SIZE_LIMIT = 4 * 1024 * 1024 };  // 4MB RAM for query
+enum { RCL_QUERY_SIZE_LIMIT = 4 * 1024 * 1024 };  // 4MB RAM
+
+typedef char rcl_filepath_t[PATH_MAX + 1];
 
 static uint64_t LOGS_PAGE_CAPACITY = 1000000;   // 1m
 static uint64_t BLOCKS_FILE_CAPACITY = 100000;  // 100k
@@ -56,10 +55,10 @@ static int rcl_page_filename(rcl_filepath_t filename,
                              const char* dirname,
                              uint64_t index,
                              char part) {
-  int count = snprintf(filename, MAX_FILE_LENGTH, "%s/%02" PRIx64 ".%c.rcl",
+  int count = snprintf(filename, PATH_MAX, "%s/%02" PRIx64 ".%c.rcl",
                        dirname, index, part);
 
-  if (rcl_unlikely(count < 0 || count >= MAX_FILE_LENGTH)) {
+  if (rcl_unlikely(count < 0 || count >= PATH_MAX)) {
     return -1;
   }
 
@@ -74,14 +73,14 @@ void rcl_page_destroy(rcl_page_t* page) {
 // type: rcl_t
 static uint32_t HASH_SEED = 1907531730ul;
 
-struct db {
+struct rcl {
   pthread_rwlock_t lock;
 
   // Config
   uint64_t ram_limit;
   rcl_filepath_t dir;
 
-  rcl_upstream_t upstream;
+  rcl_upstream_t *upstream;
 
   // DB state
   FILE* manifest;
@@ -92,15 +91,15 @@ struct db {
   vector_t data_pages;    // <rcl_page_t>
 };
 
-static int rcl_open_blocks_page(rcl_t* db) {
+static int rcl_open_blocks_page(rcl_t* self) {
   rcl_filepath_t filename = {0};
 
-  int rc = rcl_page_filename(filename, db->dir, db->blocks_pages.size, 'b');
+  int rc = rcl_page_filename(filename, self->dir, self->blocks_pages.size, 'b');
   if (rcl_unlikely(rc != 0)) {
     return -1;
   }
 
-  file_t* file = (file_t*)vector_add(&(db->blocks_pages));
+  file_t* file = (file_t*)vector_add(&(self->blocks_pages));
   if (rcl_unlikely(file == NULL)) {
     return -2;
   }
@@ -113,16 +112,16 @@ static int rcl_open_blocks_page(rcl_t* db) {
   return 0;
 }
 
-static int rcl_open_data_page(rcl_t* db) {
-  size_t index = db->data_pages.size;
+static int rcl_open_data_page(rcl_t* self) {
+  size_t index = self->data_pages.size;
 
-  rcl_page_t* page = (rcl_page_t*)vector_add(&(db->data_pages));
+  rcl_page_t* page = (rcl_page_t*)vector_add(&(self->data_pages));
   page->index = index;
 
   rcl_filepath_t addresses_file = {0}, topics_file = {0};
 
-  if ((rcl_page_filename(addresses_file, db->dir, index, 'a') != 0) ||
-      (rcl_page_filename(topics_file, db->dir, index, 't') != 0)) {
+  if ((rcl_page_filename(addresses_file, self->dir, index, 'a') != 0) ||
+      (rcl_page_filename(topics_file, self->dir, index, 't') != 0)) {
     return -1;
   }
 
@@ -149,37 +148,37 @@ static void get_position(uint64_t target,
   }
 }
 
-static rcl_block_t* rcl_get_block(rcl_t* db, uint64_t number) {
+static rcl_block_t* rcl_get_block(rcl_t* self, uint64_t number) {
   uint64_t page, offset;
   get_position(number, BLOCKS_FILE_CAPACITY, &page, &offset);
 
-  file_t* file = (file_t*)vector_at(&(db->blocks_pages), page);
+  file_t* file = (file_t*)vector_at(&(self->blocks_pages), page);
   return &(file_as_blocks(file)[offset]);
 }
 
-static int rcl_add_block(rcl_t* db, uint64_t block_number) {
-  for (; db->blocks_count <= block_number;) {
+static int rcl_add_block(rcl_t* self, uint64_t block_number) {
+  for (; self->blocks_count <= block_number;) {
     uint64_t page, offset;
-    get_position(db->blocks_count, BLOCKS_FILE_CAPACITY, &page, &offset);
+    get_position(self->blocks_count, BLOCKS_FILE_CAPACITY, &page, &offset);
 
-    if (db->blocks_pages.size <= page) {
-      int status = rcl_open_blocks_page(db);
+    if (self->blocks_pages.size <= page) {
+      int status = rcl_open_blocks_page(self);
       if (rcl_unlikely(status != 0))
         return status;
     }
 
-    file_t* file = vector_at(&(db->blocks_pages), page);
+    file_t* file = vector_at(&(self->blocks_pages), page);
 
     rcl_block_t* blocks = file_as_blocks(file);
     blocks[offset].logs_count = 0;
     blocks[offset].offset = 0;
     bloom_init(blocks[offset].logs_bloom);
 
-    if (db->blocks_count != 0) {
+    if (self->blocks_count != 0) {
       rcl_block_t* last;
 
       if (offset == 0) {
-        file_t* prev_file = vector_at(&(db->blocks_pages), page - 1);
+        file_t* prev_file = vector_at(&(self->blocks_pages), page - 1);
         rcl_block_t* prev_blocks = file_as_blocks(prev_file);
 
         last = &(prev_blocks[BLOCKS_FILE_CAPACITY - 1]);
@@ -190,7 +189,7 @@ static int rcl_add_block(rcl_t* db, uint64_t block_number) {
       blocks[offset].offset = last->offset + last->logs_count;
     }
 
-    ++db->blocks_count;
+    ++self->blocks_count;
   }
 
   return 0;
@@ -199,262 +198,253 @@ static int rcl_add_block(rcl_t* db, uint64_t block_number) {
 static rcl_result rcl_state_read(rcl_t* t) {
   int err = fseek(t->manifest, 0, SEEK_SET);
   if (err != 0)
-    return RCL_ERROR_FS_IO;
+    return RCLE_FILESYSTEM;
 
   int count = fscanf(t->manifest, "%" PRIu64 " %" PRIu64 "", &t->blocks_count,
                      &t->logs_count);
 
   if (count != 2)
-    return RCL_ERROR_FS_IO;
+    return RCLE_FILESYSTEM;
 
   rcl_debug("readed state: blocks = %zu, logs = %zu\n", t->blocks_count,
             t->logs_count);
 
-  return RCL_SUCCESS;
+  return RCLE_OK;
 }
 
 static rcl_result rcl_state_write(rcl_t* t) {
   if (fseek(t->manifest, 0, SEEK_SET) != 0)
-    return RCL_ERROR_FS_IO;
+    return RCLE_FILESYSTEM;
 
   int bytes = fprintf(t->manifest, "%" PRIu64 " %" PRIu64 "", t->blocks_count,
                       t->logs_count);
   if (bytes <= 0)
-    return RCL_ERROR_FS_IO;
+    return RCLE_FILESYSTEM;
 
   if (fflush(t->manifest) != 0)
-    return RCL_ERROR_FS_IO;
+    return RCLE_FILESYSTEM;
 
   rcl_debug("writed state: blocks = %zu, logs = %zu\n", t->blocks_count,
             t->logs_count);
 
-  return RCL_SUCCESS;
+  return RCLE_OK;
 }
 
-static rcl_result rcl_db_restore(rcl_t* db, const char* state_filename) {
-  db->manifest = fopen(state_filename, "r+");
-  if (rcl_unlikely(db->manifest == NULL)) {
-    return RCL_ERROR_FS_IO;
+static rcl_result rcl_db_restore(rcl_t* self, const char* state_filename) {
+  self->manifest = fopen(state_filename, "r+");
+  if (rcl_unlikely(self->manifest == NULL)) {
+    return RCLE_FILESYSTEM;
   }
 
-  rcl_result rr = rcl_state_read(db);
-  if (rr != RCL_SUCCESS)
+  rcl_result rr = rcl_state_read(self);
+  if (rr != RCLE_OK)
     return rr;
 
   // blocks pages
-  uint64_t blocks_pages_count = db->blocks_count / BLOCKS_FILE_CAPACITY;
-  if (blocks_pages_count * BLOCKS_FILE_CAPACITY < db->blocks_count)
+  uint64_t blocks_pages_count = self->blocks_count / BLOCKS_FILE_CAPACITY;
+  if (blocks_pages_count * BLOCKS_FILE_CAPACITY < self->blocks_count)
     blocks_pages_count++;
 
-  if (!vector_init(&(db->blocks_pages), blocks_pages_count, sizeof(file_t)))
-    return RCL_ERROR_UNKNOWN;
+  if (!vector_init(&(self->blocks_pages), blocks_pages_count, sizeof(file_t)))
+    return RCLE_UNKNOWN;
 
   for (uint64_t i = 0; i < blocks_pages_count; ++i) {
-    if (rcl_open_blocks_page(db) != 0)
-      return RCL_ERROR_FS_IO;
+    if (rcl_open_blocks_page(self) != 0)
+      return RCLE_FILESYSTEM;
   }
 
-  if (db->blocks_pages.size == 0)
-    if (rcl_open_blocks_page(db) != 0)
-      return RCL_ERROR_FS_IO;
+  if (self->blocks_pages.size == 0)
+    if (rcl_open_blocks_page(self) != 0)
+      return RCLE_FILESYSTEM;
 
   // data pages
-  uint64_t logs_pages_count = db->logs_count / LOGS_PAGE_CAPACITY;
-  if (logs_pages_count * LOGS_PAGE_CAPACITY < db->logs_count)
+  uint64_t logs_pages_count = self->logs_count / LOGS_PAGE_CAPACITY;
+  if (logs_pages_count * LOGS_PAGE_CAPACITY < self->logs_count)
     logs_pages_count++;
 
-  if (!vector_init(&(db->data_pages), logs_pages_count, sizeof(rcl_page_t)))
-    return RCL_ERROR_UNKNOWN;
+  if (!vector_init(&(self->data_pages), logs_pages_count, sizeof(rcl_page_t)))
+    return RCLE_UNKNOWN;
 
   size_t i = 0;
   do {
-    if (rcl_open_data_page(db) != 0)
-      return RCL_ERROR_FS_IO;
+    if (rcl_open_data_page(self) != 0)
+      return RCLE_FILESYSTEM;
   } while (++i < logs_pages_count);
 
-  rcl_debug("restored new db from \"%s\", %zu blocks_pages, %zu logs_pages\n",
-            db->dir, blocks_pages_count, logs_pages_count);
+  rcl_debug("restored new self from \"%s\", %zu blocks_pages, %zu logs_pages\n",
+            self->dir, blocks_pages_count, logs_pages_count);
 
-  return RCL_SUCCESS;
+  return RCLE_OK;
 }
 
-static rcl_result rcl_db_init(rcl_t* db, const char* state_filename) {
-  db->manifest = fopen(state_filename, "w+");
-  if (rcl_unlikely(db->manifest == NULL)) {
-    return RCL_ERROR_UNKNOWN;
+static rcl_result rcl_db_init(rcl_t* self, const char* state_filename) {
+  self->manifest = fopen(state_filename, "w+");
+  if (rcl_unlikely(self->manifest == NULL)) {
+    return RCLE_UNKNOWN;
   }
 
-  db->blocks_count = 0;
-  db->logs_count = 0;
+  self->blocks_count = 0;
+  self->logs_count = 0;
 
-  if (!vector_init(&(db->blocks_pages), 1, sizeof(file_t)))
-    return RCL_ERROR_UNKNOWN;
-  if (rcl_open_blocks_page(db) != 0)
-    return RCL_ERROR_FS_IO;
+  if (!vector_init(&(self->blocks_pages), 1, sizeof(file_t)))
+    return RCLE_UNKNOWN;
+  if (rcl_open_blocks_page(self) != 0)
+    return RCLE_FILESYSTEM;
 
-  if (!vector_init(&(db->data_pages), 1, sizeof(rcl_page_t)))
-    return RCL_ERROR_UNKNOWN;
-  if (rcl_open_data_page(db) != 0)
-    return RCL_ERROR_UNKNOWN;
+  if (!vector_init(&(self->data_pages), 1, sizeof(rcl_page_t)))
+    return RCLE_UNKNOWN;
+  if (rcl_open_data_page(self) != 0)
+    return RCLE_UNKNOWN;
 
-  rcl_result wr = rcl_state_write(db);
-  if (wr != RCL_SUCCESS)
+  rcl_result wr = rcl_state_write(self);
+  if (wr != RCLE_OK)
     return wr;
 
-  rcl_debug("init new db in \"%s\"\n", db->dir);
+  rcl_debug("init new db in \"%s\"\n", self->dir);
 
-  return RCL_SUCCESS;
+  return RCLE_OK;
 }
 
-static int rcl_upstream_callback(vector_t* logs, void* data) {
-  rcl_t* db = data;
-
-  int rc = rcl_insert(db, logs->size, (rcl_log_t*)(logs->buffer));
-  if (rc != RCL_SUCCESS) {
-    rcl_error("couldn't to insert fetched logs; code %d\n", rc);
-    return -1;
-  }
-
-  return 0;
+static rcl_result rcl_upstream_callback(vector_t* logs, void* data) {
+  return rcl_insert((rcl_t*)data, logs->size, (rcl_log_t*)(logs->buffer));
 }
 
 rcl_result rcl_open(char* dir, uint64_t ram_limit, rcl_t** db_ptr) {
-  if (curl_global_init(CURL_GLOBAL_DEFAULT) != 0) {
-    return RCL_ERROR_UNKNOWN;
+  rcl_t* self = (rcl_t*)malloc(sizeof(rcl_t));
+  if (self == NULL) {
+    rcl_perror("malloc rcl_t");
+    return RCLE_OUT_OF_MEMORY;
   }
 
-  rcl_t* db = (rcl_t*)malloc(sizeof(rcl_t));
-  if (db == NULL) {
-    return RCL_ERROR_MEMORY_ALLOCATION;
+  *db_ptr = self;
+
+  if (pthread_rwlock_init(&(self->lock), NULL) != 0) {
+    return RCLE_UNKNOWN;
   }
 
-  *db_ptr = db;
-
-  if (pthread_rwlock_init(&(db->lock), NULL) != 0) {
-    return RCL_ERROR_UNKNOWN;
-  }
-
-  db->ram_limit = ram_limit;
-  strncpy(db->dir, dir, MAX_FILE_LENGTH);
+  self->ram_limit = ram_limit;
+  strncpy(self->dir, dir, PATH_MAX);
 
   rcl_filepath_t state_filename = {0};
   int count =
-      snprintf(state_filename, MAX_FILE_LENGTH, "%s/%s", db->dir, "toc.txt");
-  if (rcl_unlikely(count < 0 || count >= MAX_FILE_LENGTH)) {
-    return RCL_ERROR_UNKNOWN;
+      snprintf(state_filename, PATH_MAX, "%s/%s", self->dir, "toc.txt");
+  if (rcl_unlikely(count < 0 || count >= PATH_MAX)) {
+    return RCLE_UNKNOWN;
   }
 
-  rcl_result result = RCL_SUCCESS;
+  rcl_result result = RCLE_OK;
   if (access(state_filename, F_OK) == 0) {
-    result = rcl_db_restore(db, state_filename);
+    result = rcl_db_restore(self, state_filename);
   } else {
-    result = rcl_db_init(db, state_filename);
+    result = rcl_db_init(self, state_filename);
   }
 
-  if (result != RCL_SUCCESS)
+  if (result != RCLE_OK)
     return result;
 
-  rcl_upstream_init(&(db->upstream),
-                    db->blocks_count == 0 ? 0 : db->blocks_count - 1,
-                    rcl_upstream_callback, db);
+  rcl_upstream_init(&(self->upstream),
+                    self->blocks_count == 0 ? 0 : self->blocks_count - 1,
+                    rcl_upstream_callback, self);
 
-  return RCL_SUCCESS;
+  return RCLE_OK;
 }
 
-void rcl_free(rcl_t* db) {
-  // Clear db
-  rcl_upstream_free(&(db->upstream));
+void rcl_free(rcl_t* self) {
+  rcl_upstream_free(self->upstream);
 
-  pthread_rwlock_wrlock(&(db->lock));
+  pthread_rwlock_wrlock(&(self->lock));
 
-  rcl_result _ = rcl_state_write(db);
-  fclose(db->manifest);
+  (void)rcl_state_write(self);
+  fclose(self->manifest);
 
-  for (uint64_t i = 0; i < db->blocks_pages.size; ++i) {
-    file_t* it = (file_t*)(vector_remove_last(&(db->blocks_pages)));
+  for (uint64_t i = 0; i < self->blocks_pages.size; ++i) {
+    file_t* it = (file_t*)(vector_remove_last(&(self->blocks_pages)));
     file_close(it);
   }
 
-  for (uint64_t i = 0; i < db->data_pages.size; ++i) {
-    rcl_page_t* it = (rcl_page_t*)(vector_remove_last(&(db->data_pages)));
+  for (uint64_t i = 0; i < self->data_pages.size; ++i) {
+    rcl_page_t* it = (rcl_page_t*)(vector_remove_last(&(self->data_pages)));
     rcl_page_destroy(it);
   }
 
-  vector_destroy(&(db->blocks_pages));
-  vector_destroy(&(db->data_pages));
+  vector_destroy(&(self->blocks_pages));
+  vector_destroy(&(self->data_pages));
 
-  pthread_rwlock_unlock(&(db->lock));
-  pthread_rwlock_destroy(&(db->lock));
+  pthread_rwlock_unlock(&(self->lock));
+  pthread_rwlock_destroy(&(self->lock));
 
-  free(db);
-
-  // Clear global
-  curl_global_cleanup();
+  free(self);
 }
 
-rcl_result rcl_update_height(rcl_t* db, uint64_t height) {
-  rcl_result result = RCL_SUCCESS;
+rcl_result rcl_update_height(rcl_t* self, uint64_t height) {
+  rcl_result result = rcl_upstream_set_height(self->upstream, height);
+  if (result != RCLE_OK) return result;
 
-  rcl_upstream_set_height(&(db->upstream), height);
+  int rc;
+  if ((rc = pthread_rwlock_wrlock(&(self->lock)))) {
+    rcl_error("failed lock mutex, code %i\n", rc);
+    return RCLE_UNKNOWN;
+  }
 
-  pthread_rwlock_wrlock(&(db->lock));
-  result = rcl_state_write(db);
-  pthread_rwlock_unlock(&(db->lock));
+  result = rcl_state_write(self);
+
+  if ((rc = pthread_rwlock_unlock(&(self->lock)))) {
+    rcl_error("failed unlock mutex, code %i\n", rc);
+    return RCLE_UNKNOWN;
+  }
 
   return result;
 }
 
-static void* rcl_fetcher_thread(void* data);
-
-rcl_result rcl_set_upstream(rcl_t* db, const char* upstream) {
-  if (rcl_upstream_set_url(&(db->upstream), upstream) != 0)
-    return RCL_ERROR_UNKNOWN;
-
-  return RCL_SUCCESS;
+rcl_result rcl_set_upstream(rcl_t* self, const char* upstream) {
+  return rcl_upstream_set_url(self->upstream, upstream);
 }
 
-rcl_result rcl_insert(rcl_t* db, size_t size, rcl_log_t* logs) {
+rcl_result rcl_insert(rcl_t* self, size_t size, rcl_log_t* logs) {
   int rc;
-  rcl_result result = RCL_SUCCESS;
+  rcl_result result = RCLE_OK;
 
   if (size == 0)
-    return RCL_SUCCESS;
+    return RCLE_OK;
 
-  pthread_rwlock_wrlock(&(db->lock));
+  if ((rc = pthread_rwlock_wrlock(&(self->lock)))) {
+    rcl_error("failed lock mutex, code %i\n", rc);
+    return RCLE_UNKNOWN;
+  }
 
   for (rcl_log_t *log = logs, *end = logs + size; log != end;) {
     uint64_t block_number = log->block_number;
 
-    if (rcl_unlikely(db->blocks_count > block_number + 1)) {
+    if (rcl_unlikely(self->blocks_count > block_number + 1)) {
       rcl_debug("add to old block, current: %zu, blocks count: %zu\n",
-                block_number, db->blocks_count);
-      result = RCL_ERROR_INSERT_LOGS_TO_OLD_BLOCK;
+                block_number, self->blocks_count);
+      result = RCLE_UNKNOWN;
       goto error;
     }
 
-    if (block_number >= db->blocks_count) {
-      if (rcl_add_block(db, block_number) != 0) {
-        result = RCL_ERROR_UNKNOWN;
+    if (block_number >= self->blocks_count) {
+      if (rcl_add_block(self, block_number) != 0) {
+        result = RCLE_UNKNOWN;
         goto error;
       }
     }
 
-    rcl_block_t* block = rcl_get_block(db, block_number);
+    rcl_block_t* block = rcl_get_block(self, block_number);
     assert(block != NULL);
 
     size_t count = 0;
     for (; log != end && log->block_number == block_number; ++log) {
       uint64_t page, offset;
-      get_position(db->logs_count + count, LOGS_PAGE_CAPACITY, &page, &offset);
+      get_position(self->logs_count + count, LOGS_PAGE_CAPACITY, &page, &offset);
 
-      if (db->data_pages.size <= page) {
-        if (rcl_open_data_page(db) != 0) {
-          result = RCL_ERROR_UNKNOWN;
+      if (self->data_pages.size <= page) {
+        if (rcl_open_data_page(self) != 0) {
+          result = RCLE_UNKNOWN;
           goto error;
         }
       }
 
-      rcl_page_t* logs_page = vector_at(&(db->data_pages), page);
+      rcl_page_t* logs_page = vector_at(&(self->data_pages), page);
       assert(logs_page != NULL);
 
       bloom_add(&(block->logs_bloom), log->address);
@@ -471,14 +461,18 @@ rcl_result rcl_insert(rcl_t* db, size_t size, rcl_log_t* logs) {
     }
 
     block->logs_count += count;
-    db->logs_count += count;
+    self->logs_count += count;
   }
 
 error:
-  if ((rc = rcl_state_write(db)) != RCL_SUCCESS)
+  if ((rc = rcl_state_write(self)) != RCLE_OK)
     result = rc;
 
-  pthread_rwlock_unlock(&(db->lock));
+  if ((rc = pthread_rwlock_unlock(&(self->lock)))) {
+    rcl_error("failed unlock mutex, code %i\n", rc);
+    return RCLE_UNKNOWN;
+  }
+
   return result;
 }
 
@@ -493,11 +487,13 @@ rcl_result rcl_query_alloc(rcl_query_t** query,
     bytes += sizeof(struct rcl_query_topics[TOPICS_LENGTH]) * tlen[i];
 
   if (bytes > RCL_QUERY_SIZE_LIMIT)
-    return RCL_ERROR_TOO_BIG_QUERY;
+    return RCLE_TOO_LARGE_QUERY;
 
   void* ptr = malloc(bytes);
-  if (ptr == NULL)
-    return RCL_ERROR_MEMORY_ALLOCATION;
+  if (ptr == NULL) {
+    rcl_perror("malloc rcl_query_t");
+    return RCLE_OUT_OF_MEMORY;
+  }
 
   *query = (void*)ptr;
   ptr += sizeof(rcl_query_t);
@@ -517,21 +513,21 @@ rcl_result rcl_query_alloc(rcl_query_t** query,
   (*query)->alen = alen;
   memcpy((*query)->tlen, tlen, sizeof(size_t) * TOPICS_LENGTH);
 
-  return RCL_SUCCESS;
+  return RCLE_OK;
 }
 
 void rcl_query_free(rcl_query_t* query) {
   free((void*)query);
 }
 
-static bool rcl_query_check_data(rcl_t* db,
+static bool rcl_query_check_data(rcl_t* self,
                                  rcl_query_t* q,
                                  size_t page,
                                  size_t offset) {
   size_t k;
   bool match;
 
-  rcl_page_t* logs_page = vector_at(&(db->data_pages), page);
+  rcl_page_t* logs_page = vector_at(&(self->data_pages), page);
 
   uint64_t address = file_as_addresses(logs_page->addresses)[offset];
   uint64_t* topics = file_as_topics(logs_page->topics)[offset];
@@ -553,21 +549,29 @@ static bool rcl_query_check_data(rcl_t* db,
   return true;
 }
 
-rcl_result rcl_query(rcl_t* db, rcl_query_t* query, uint64_t* result) {
+rcl_result rcl_query(rcl_t* self, rcl_query_t* query, uint64_t* result) {
   *result = 0;
 
-  // pre-check
-  pthread_rwlock_rdlock(&(db->lock));
-  uint64_t blocks_count = db->blocks_count;
-  uint64_t logs_count = db->logs_count;
-  pthread_rwlock_unlock(&(db->lock));
-
-  if (blocks_count == 0 || logs_count == 0)
-    return RCL_SUCCESS;
-
-  // fill
   int rc;
 
+  // pre-check
+  if ((rc = pthread_rwlock_rdlock(&(self->lock)))) {
+    rcl_error("failed lock mutex, code %i\n", rc);
+    return RCLE_UNKNOWN;
+  }
+
+  uint64_t blocks_count = self->blocks_count;
+  uint64_t logs_count = self->logs_count;
+
+  if ((rc = pthread_rwlock_unlock(&(self->lock)))) {
+    rcl_error("failed unlock mutex, code %i\n", rc);
+    return RCLE_UNKNOWN;
+  }
+
+  if (blocks_count == 0 || logs_count == 0)
+    return RCLE_OK;
+
+  // fill
   query->_has_addresses = query->alen > 0;
   query->_has_topics = false;
 
@@ -575,7 +579,7 @@ rcl_result rcl_query(rcl_t* db, rcl_query_t* query, uint64_t* result) {
     rc = hex2bin(query->address[i]._data, query->address[i].encoded,
                  sizeof(rcl_address_t));
     if (rc != 0)
-      return RCL_ERROR_UNKNOWN;
+      return RCLE_UNKNOWN;
 
     query->address[i]._hash =
         murmur64A(query->address[i]._data, sizeof(rcl_address_t), HASH_SEED);
@@ -590,7 +594,7 @@ rcl_result rcl_query(rcl_t* db, rcl_query_t* query, uint64_t* result) {
       rc = hex2bin(query->topics[i][j]._data, query->topics[i][j].encoded,
                    sizeof(rcl_hash_t));
       if (rc != 0)
-        return RCL_ERROR_UNKNOWN;
+        return RCLE_UNKNOWN;
 
       query->topics[i][j]._hash =
           murmur64A(query->topics[i][j]._data, sizeof(rcl_hash_t), HASH_SEED);
@@ -598,13 +602,17 @@ rcl_result rcl_query(rcl_t* db, rcl_query_t* query, uint64_t* result) {
   }
 
   // calc
-  pthread_rwlock_rdlock(&(db->lock));
+  if ((rc = pthread_rwlock_rdlock(&(self->lock)))) {
+    rcl_error("failed lock mutex, code %i\n", rc);
+    return RCLE_UNKNOWN;
+  }
+
   uint64_t start = query->from, end = query->to;
-  if (end >= db->blocks_count)
-    end = db->blocks_count - 1;
+  if (end >= self->blocks_count)
+    end = self->blocks_count - 1;
 
   for (size_t number = start; number <= end; ++number) {
-    rcl_block_t* block = rcl_get_block(db, number);
+    rcl_block_t* block = rcl_get_block(self, number);
     assert(block != NULL);
 
     if (!query->_has_addresses && !query->_has_topics) {
@@ -620,27 +628,51 @@ rcl_result rcl_query(rcl_t* db, rcl_query_t* query, uint64_t* result) {
       uint64_t page, offset;
       get_position(l, LOGS_PAGE_CAPACITY, &page, &offset);
 
-      if (rcl_query_check_data(db, query, page, offset))
+      if (rcl_query_check_data(self, query, page, offset))
         ++(*result);
     }
   }
-  pthread_rwlock_unlock(&(db->lock));
 
-  return RCL_SUCCESS;
+  if ((rc = pthread_rwlock_unlock(&(self->lock)))) {
+    rcl_error("failed unlock mutex, code %i\n", rc);
+    return RCLE_UNKNOWN;
+  }
+
+  return RCLE_OK;
 }
 
-rcl_result rcl_blocks_count(rcl_t* db, uint64_t* result) {
-  pthread_rwlock_rdlock(&(db->lock));
-  *result = db->blocks_count;
-  pthread_rwlock_unlock(&(db->lock));
+rcl_result rcl_blocks_count(rcl_t* self, uint64_t* result) {
+  int rc;
 
-  return RCL_SUCCESS;
+  if ((rc = pthread_rwlock_rdlock(&(self->lock)))) {
+    rcl_error("failed lock mutex, code %i\n", rc);
+    return RCLE_UNKNOWN;
+  }
+
+  *result = self->blocks_count;
+
+  if ((rc = pthread_rwlock_unlock(&(self->lock)))) {
+    rcl_error("failed unlock mutex, code %i\n", rc);
+    return RCLE_UNKNOWN;
+  }
+
+  return RCLE_OK;
 }
 
-rcl_result rcl_logs_count(rcl_t* db, uint64_t* result) {
-  pthread_rwlock_rdlock(&(db->lock));
-  *result = db->logs_count;
-  pthread_rwlock_unlock(&(db->lock));
+rcl_result rcl_logs_count(rcl_t* self, uint64_t* result) {
+  int rc;
 
-  return RCL_SUCCESS;
+  if ((rc = pthread_rwlock_rdlock(&(self->lock)))) {
+    rcl_error("failed lock mutex, code %i\n", rc);
+    return RCLE_UNKNOWN;
+  }
+
+  *result = self->logs_count;
+
+  if ((rc = pthread_rwlock_unlock(&(self->lock)))) {
+    rcl_error("failed unlock mutex, code %i\n", rc);
+    return RCLE_UNKNOWN;
+  }
+
+  return RCLE_OK;
 }

@@ -18,6 +18,8 @@ class Constants {
     static final int ADDRESS_LENGTH = 20;
     static final int TOPICS_LENGTH = 4;
 
+    static final int RCLE_OK = 0;
+
     static final OfBoolean C_BOOL_LAYOUT = JAVA_BOOLEAN;
     static final OfByte C_CHAR_LAYOUT = JAVA_BYTE;
     static final OfShort C_SHORT_LAYOUT = JAVA_SHORT;
@@ -132,12 +134,6 @@ public class LogsOracle implements AutoCloseable {
         }
     }
 
-    static final OfAddress C_POINTER = Constants.C_POINTER_LAYOUT;
-
-    static final int RCL_SUCCESS = 0;
-    static final int RCL_ERROR_MEMORY_ALLOCATION = 4;
-    static final int RCL_ERROR_UNKNOWN = 6;
-
     private static final Linker LINKER = Linker.nativeLinker();
     private static final SymbolLookup SYMBOL_LOOKUP;
 
@@ -177,15 +173,6 @@ public class LogsOracle implements AutoCloseable {
             Constants.C_POINTER_LAYOUT,
             Constants.C_POINTER_LAYOUT,
             Constants.C_POINTER_LAYOUT));
-    static final MethodHandle rcl_query_alloc_MH = downcallHandle("rcl_query_alloc",
-        FunctionDescriptor.of(
-            Constants.C_INT_LAYOUT,
-            Constants.C_POINTER_LAYOUT,
-            Constants.C_LONG_LONG_LAYOUT,
-            Constants.C_POINTER_LAYOUT));
-    static final MethodHandle rcl_query_free_MH = downcallHandle("rcl_query_free",
-        FunctionDescriptor.ofVoid(
-            Constants.C_POINTER_LAYOUT));
     static final MethodHandle rcl_logs_count_MH = downcallHandle("rcl_logs_count",
         FunctionDescriptor.of(
             Constants.C_INT_LAYOUT,
@@ -196,10 +183,14 @@ public class LogsOracle implements AutoCloseable {
             Constants.C_INT_LAYOUT,
             Constants.C_POINTER_LAYOUT,
             Constants.C_POINTER_LAYOUT));
+    static final MethodHandle rcl_strerror_MH = downcallHandle("rcl_strerror",
+        FunctionDescriptor.of(
+            Constants.C_POINTER_LAYOUT,
+            Constants.C_INT_LAYOUT));
 
-    public LogsOracle(String dir, long ram_limit) throws Exception {
+    public LogsOracle(String dir, long ram_limit) throws LogsOracleException {
         try (Arena arena = Arena.openConfined()) {
-            var dbPtr = connArena.allocate(C_POINTER);
+            var dbPtr = connArena.allocate(Contants.C_POINTER_LAYOUT);
 
             int rc;
             try {
@@ -208,15 +199,15 @@ public class LogsOracle implements AutoCloseable {
                 throw new AssertionError("should not reach here", ex);
             }
 
-            if (rc != RCL_SUCCESS) {
-                throw new Exception("liboracle connection failed");
-            } else {
-                connPtr = dbPtr.get(C_POINTER, 0);
+            if (rc != Constants.RCLE_OK) {
+                throw exception(rc);
             }
+
+            connPtr = dbPtr.get(Contants.C_POINTER_LAYOUT, 0);
         }
     }
 
-    public void UpdateHeight(long height) throws Exception {
+    public void UpdateHeight(long height) throws LogsOracleException {
         try (Arena arena = Arena.openConfined()) {
             int rc;
             try {
@@ -225,12 +216,12 @@ public class LogsOracle implements AutoCloseable {
                 throw new AssertionError("should not reach here", ex);
             }
 
-            if (rc != RCL_SUCCESS)
-                throw new Exception("liboracle failed");
+            if (rc != Constants.RCLE_OK)
+                throw exception(rc);
         }
     }
 
-    public void SetUpstream(String upstream) throws Exception {
+    public void SetUpstream(String upstream) throws LogsOracleException {
         try (Arena arena = Arena.openConfined()) {
             int rc;
             try {
@@ -239,12 +230,12 @@ public class LogsOracle implements AutoCloseable {
                 throw new AssertionError("should not reach here", ex);
             }
 
-            if (rc != RCL_SUCCESS)
-                throw new Exception("liboracle connection failed");
+            if (rc != Constants.RCLE_OK)
+                throw exception(rc);
         }
     }
 
-    public long Query(long fromBlock, long toBlock, List<String> address, List<List<String>> topics) throws Exception {
+    public long Query(long fromBlock, long toBlock, List<String> address, List<List<String>> topics) throws LogsOracleException {
         try (Arena arena = Arena.openConfined()) {
             var query = arena.allocate(rcl_query_t.LAYOUT);
             rcl_query_t.from_VH.set(query, fromBlock);
@@ -290,7 +281,7 @@ public class LogsOracle implements AutoCloseable {
             }
 
             // call
-            var result = arena.allocate(C_POINTER);
+            var result = arena.allocate(Contants.C_POINTER_LAYOUT);
 
             int rc;
             try {
@@ -298,16 +289,16 @@ public class LogsOracle implements AutoCloseable {
             } catch (Throwable ex) {
                 throw new AssertionError("should not reach here", ex);
             }
-            if (rc != RCL_SUCCESS)
-            throw new Exception("liboracle: failed perform query");
+            if (rc != Constants.RCLE_OK)
+                throw exception(rc);
 
             return result.get(ValueLayout.JAVA_LONG, 0);
         }
     }
 
-    public long GetLogsCount() throws Exception {
+    public long GetLogsCount() throws LogsOracleException {
         try (Arena arena = Arena.openConfined()) {
-            var result = arena.allocate(C_POINTER);
+            var result = arena.allocate(Contants.C_POINTER_LAYOUT);
 
             int rc;
             try {
@@ -315,16 +306,16 @@ public class LogsOracle implements AutoCloseable {
             } catch (Throwable ex) {
                 throw new AssertionError("should not reach here", ex);
             }
-            if (rc != RCL_SUCCESS)
-            throw new Exception("liboracle failed");
+            if (rc != Constants.RCLE_OK)
+                throw exception(rc);
 
             return result.get(ValueLayout.JAVA_LONG, 0);
         }
     }
 
-    public long GetBlocksCount() throws Exception {
+    public long GetBlocksCount() throws LogsOracleException {
         try (Arena arena = Arena.openConfined()) {
-            var result = arena.allocate(C_POINTER);
+            var result = arena.allocate(Contants.C_POINTER_LAYOUT);
 
             int rc;
             try {
@@ -333,8 +324,8 @@ public class LogsOracle implements AutoCloseable {
                 throw new AssertionError("should not reach here", ex);
             }
 
-            if (rc != RCL_SUCCESS)
-            throw new Exception("liboracle failed");
+            if (rc != Constants.RCLE_OK)
+                throw exception(rc);
 
             return result.get(ValueLayout.JAVA_LONG, 0);
         }
@@ -348,5 +339,20 @@ public class LogsOracle implements AutoCloseable {
             throw new AssertionError("should not reach here", ex);
         }
         connArena.close();
+    }
+
+    LogsOracleException exception(int code) {
+        try {
+            MemorySegment error = (MemorySegment)rcl_strerror_MH.invokeExact(code);
+            return new LogsOracleException(error.getUtf8String(0));
+        } catch (Throwable ex) {
+            throw new AssertionError("should not reach here", ex);
+        }
+    }
+
+    class LogsOracleException extends Exception {
+        public LogsOracleException(String s) {
+            super("liboracle error: " + s);
+        }
     }
 }
