@@ -364,7 +364,7 @@ static rcl_result req_process(rcl_upstream_t* self, CURLM* multi, CURLMsg* msg) 
   return RCLE_OK;
 }
 
-static rcl_result rcl_upstream_send(rcl_upstream_t* self, CURLM* multi, uint64_t* start) {
+static rcl_result rcl_upstream_send(rcl_upstream_t* self, CURLM* multi, uint64_t* start, int* inprogress) {
   if (self->closed || *start > self->height)
     return RCLE_OK;
 
@@ -436,6 +436,8 @@ static rcl_result rcl_upstream_send(rcl_upstream_t* self, CURLM* multi, uint64_t
       rcl_error("add in multi_handle: %s\n", curl_url_strerror(rc));
       return RCLE_LIBCURL;
     }
+
+    ++(*inprogress);
   }
 
   return RCLE_OK;
@@ -465,7 +467,7 @@ static rcl_result rcl_upstream_receive(rcl_upstream_t* self, CURLM* multi) {
   return RCLE_OK;
 }
 
-static rcl_result rcl_upstream_process(rcl_upstream_t* self, bool exact) {
+static rcl_result rcl_upstream_process(rcl_upstream_t* self, int* inprogress, bool exact) {
   rcl_result rc;
 
   for (size_t i = 0; i < CONNECTIONS_COUNT && !self->closed; ++i) {
@@ -492,6 +494,8 @@ static rcl_result rcl_upstream_process(rcl_upstream_t* self, bool exact) {
         if (req->to > self->last)
           self->last = req->to;
 
+        --(*inprogress);
+
         // rcl_debug("added %zu logs from: %zu to %zu, last: %zu, height: %zu\n",
         //           req->logs.size, req->from, req->to, self->last, self->height);
 
@@ -509,16 +513,22 @@ static rcl_result rcl_upstream_process(rcl_upstream_t* self, bool exact) {
 static rcl_result rcl_upstream_poll(rcl_upstream_t* self) {
   rcl_result rc = 0;
 
+  int inprogress = 0;
   uint64_t start = self->last == 0 ? 0 : self->last + 1;
+
   CURLM* multi_handle = curl_multi_init();
   if (multi_handle == NULL)
     return RCLE_LIBCURL;
 
-  int still_running = 1, numfds;
-  while(still_running && !self->closed) {
-    if ((rc = rcl_upstream_send(self, multi_handle, &start)))
-      goto exit;
+  rcl_debug("start new poll from %zu\n", start);
 
+  if ((rc = rcl_upstream_send(self, multi_handle, &start, &inprogress)))
+    goto exit;
+
+  do {
+    if (self->closed) break;
+
+    int still_running, numfds;
     CURLMcode mc = curl_multi_perform(multi_handle, &still_running);
     if (mc != CURLM_OK) {
       rcl_error("curl_multi_perform failed: '%s'\n", curl_multi_strerror(mc));
@@ -536,9 +546,12 @@ static rcl_result rcl_upstream_poll(rcl_upstream_t* self) {
     if ((rc = rcl_upstream_receive(self, multi_handle)))
       goto exit;
 
-    if ((rc = rcl_upstream_process(self, false)))
+    if ((rc = rcl_upstream_process(self, &inprogress, false)))
       goto exit;
-  }
+
+    if ((rc = rcl_upstream_send(self, multi_handle, &start, &inprogress)))
+      goto exit;
+  } while(inprogress > 0);
 
   if (self->closed)
     goto exit;
@@ -546,10 +559,11 @@ static rcl_result rcl_upstream_poll(rcl_upstream_t* self) {
   if ((rc = rcl_upstream_receive(self, multi_handle)))
     goto exit;
 
-  if ((rc = rcl_upstream_process(self, true)))
+  if ((rc = rcl_upstream_process(self, &inprogress, true)))
     goto exit;
 
 exit:
+  rcl_debug("end poll\n", start);
   curl_multi_cleanup(multi_handle);
   return rc;
 }
