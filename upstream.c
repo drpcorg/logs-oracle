@@ -365,6 +365,9 @@ static rcl_result req_process(rcl_upstream_t* self, CURLM* multi, CURLMsg* msg) 
 }
 
 static rcl_result rcl_upstream_send(rcl_upstream_t* self, CURLM* multi, uint64_t* start) {
+  if (self->closed || *start > self->height)
+    return RCLE_OK;
+
   int rc;
 
   size_t i = 0;
@@ -511,11 +514,8 @@ static rcl_result rcl_upstream_poll(rcl_upstream_t* self) {
   if (multi_handle == NULL)
     return RCLE_LIBCURL;
 
-  int still_running, numfds;
-  do {
-    if (self->closed || start > self->height)
-      break;
-
+  int still_running = 1, numfds;
+  while(still_running && !self->closed) {
     if ((rc = rcl_upstream_send(self, multi_handle, &start)))
       goto exit;
 
@@ -538,7 +538,7 @@ static rcl_result rcl_upstream_poll(rcl_upstream_t* self) {
 
     if ((rc = rcl_upstream_process(self, false)))
       goto exit;
-  } while (still_running);
+  }
 
   if (self->closed)
     goto exit;
