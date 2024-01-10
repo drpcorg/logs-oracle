@@ -103,9 +103,24 @@ static int rcl_open_blocks_page(rcl_t* self) {
     return -2;
   }
 
-  rc = file_open(file, filename, BLOCKS_FILE_CAPACITY * sizeof(rcl_block_t));
+  size_t filesize = BLOCKS_FILE_CAPACITY * sizeof(rcl_block_t);
+  rc = file_open(file, filename, filesize);
   if (rcl_unlikely(rc != 0)) {
     return -3;
+  }
+
+  int64_t locked_count = self->ram_limit / filesize;
+  for (int64_t i = self->blocks_pages.size - 1; i >= 0; --i) {
+    file_t* file = (file_t*)vector_at(&(self->blocks_pages), i);
+
+    if (locked_count > 0) {
+      locked_count--;
+      if (file_lock(file))
+        rcl_error("failed to lock the file with index\n");
+    } else {
+      if (file_unlock(file))
+        rcl_error("failed to unlock the file with index\n");
+    }
   }
 
   return 0;

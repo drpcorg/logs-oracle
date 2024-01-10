@@ -4,7 +4,7 @@
 #include "common.h"
 
 typedef struct {
-  int fd;
+  int fd, locked;
   size_t bytes;
   void* buffer;
 } file_t;
