@@ -41,23 +41,27 @@ class Constants {
 }
 
 class rcl_query_address {
-    static final StructLayout LAYOUT = MemoryLayout.structLayout(
-        Constants.C_POINTER_LAYOUT.withName("encoded"),
-        Constants.C_LONG_LONG_LAYOUT.withName("_hash"),
-        MemoryLayout.sequenceLayout(20, Constants.C_CHAR_LAYOUT).withName("_data"),
-        MemoryLayout.paddingLayout(32)
-    ).withName("rcl_query_address");
+    static final StructLayout LAYOUT =
+            MemoryLayout
+                    .structLayout(Constants.C_POINTER_LAYOUT.withName("encoded"),
+                            Constants.C_LONG_LONG_LAYOUT.withName("_hash"),
+                            MemoryLayout.sequenceLayout(20, Constants.C_CHAR_LAYOUT)
+                                    .withName("_data"),
+                            MemoryLayout.paddingLayout(32))
+                    .withName("rcl_query_address");
 
     static final VarHandle encoded_VH =
             LAYOUT.varHandle(MemoryLayout.PathElement.groupElement("encoded"));
 }
 
 class rcl_query_topics {
-    static final StructLayout LAYOUT = MemoryLayout.structLayout(
-        Constants.C_POINTER_LAYOUT.withName("encoded"),
-        Constants.C_LONG_LONG_LAYOUT.withName("_hash"),
-        MemoryLayout.sequenceLayout(32, Constants.C_CHAR_LAYOUT).withName("_data")
-    ).withName("rcl_query_topics");
+    static final StructLayout LAYOUT =
+            MemoryLayout
+                    .structLayout(Constants.C_POINTER_LAYOUT.withName("encoded"),
+                            Constants.C_LONG_LONG_LAYOUT.withName("_hash"),
+                            MemoryLayout.sequenceLayout(32, Constants.C_CHAR_LAYOUT)
+                                    .withName("_data"))
+                    .withName("rcl_query_topics");
 
     static final VarHandle encoded_VH =
             LAYOUT.varHandle(MemoryLayout.PathElement.groupElement("encoded"));
@@ -65,21 +69,23 @@ class rcl_query_topics {
 
 class rcl_query_t {
     static final StructLayout LAYOUT = MemoryLayout.structLayout(
-        Constants.C_POINTER_LAYOUT.withName("address"),
-        MemoryLayout.sequenceLayout(Constants.TOPICS_LENGTH, Constants.C_POINTER_LAYOUT).withName("topics"),
-        Constants.C_LONG_LONG_LAYOUT.withName("from"),
-        Constants.C_LONG_LONG_LAYOUT.withName("to"),
-        Constants.C_LONG_LONG_LAYOUT.withName("limit"),
-        Constants.C_LONG_LONG_LAYOUT.withName("alen"),
-        MemoryLayout.sequenceLayout(Constants.TOPICS_LENGTH, Constants.C_LONG_LONG_LAYOUT).withName("tlen"),
-        Constants.C_BOOL_LAYOUT, Constants.C_BOOL_LAYOUT, // _has_addresses, _has_topics
-        MemoryLayout.paddingLayout(48)
-    );
+            Constants.C_POINTER_LAYOUT.withName("address"),
+            MemoryLayout.sequenceLayout(Constants.TOPICS_LENGTH, Constants.C_POINTER_LAYOUT)
+                    .withName("topics"),
+            Constants.C_LONG_LONG_LAYOUT.withName("from"),
+            Constants.C_LONG_LONG_LAYOUT.withName("to"),
+            Constants.C_LONG_LONG_LAYOUT.withName("limit"),
+            Constants.C_LONG_LONG_LAYOUT.withName("alen"),
+            MemoryLayout.sequenceLayout(Constants.TOPICS_LENGTH, Constants.C_LONG_LONG_LAYOUT)
+                    .withName("tlen"),
+            Constants.C_BOOL_LAYOUT, Constants.C_BOOL_LAYOUT, // _has_addresses, _has_topics
+            MemoryLayout.paddingLayout(48));
 
     static final VarHandle from_VH =
             LAYOUT.varHandle(MemoryLayout.PathElement.groupElement("from"));
     static final VarHandle to_VH = LAYOUT.varHandle(MemoryLayout.PathElement.groupElement("to"));
-    static final VarHandle limit_VH = LAYOUT.varHandle(MemoryLayout.PathElement.groupElement("limit"));
+    static final VarHandle limit_VH =
+            LAYOUT.varHandle(MemoryLayout.PathElement.groupElement("limit"));
 
     static final VarHandle alen_VH =
             LAYOUT.varHandle(MemoryLayout.PathElement.groupElement("alen"));
@@ -212,17 +218,15 @@ public class LogsOracle implements AutoCloseable {
     }
 
     public void UpdateHeight(long height) throws LogsOracleException {
-        try (Arena arena = Arena.openConfined()) {
-            int rc;
-            try {
-                rc = (int) rcl_update_height_MH.invokeExact(connPtr, height);
-            } catch (Throwable ex) {
-                throw new AssertionError("should not reach here", ex);
-            }
-
-            if (rc != Constants.RCLE_OK)
-                throw exception(rc);
+        int rc;
+        try {
+            rc = (int) rcl_update_height_MH.invokeExact(connPtr, height);
+        } catch (Throwable ex) {
+            throw new AssertionError("should not reach here", ex);
         }
+
+        if (rc != Constants.RCLE_OK)
+            throw exception(rc);
     }
 
     public void SetUpstream(String upstream) throws LogsOracleException {
@@ -252,125 +256,127 @@ public class LogsOracle implements AutoCloseable {
             rcl_query_t.to_VH.set(query, toBlock);
             rcl_query_t.limit_VH.set(query, limit == null ? -1L : limit.longValue());
 
-            // address
-            long alen = address.size();
-            rcl_query_t.alen_VH.set(query, alen);
-            if (alen > 0) {
-                var addressPtr = arena.allocateArray(rcl_query_address.LAYOUT, alen);
-                for (int i = 0; i < alen; ++i) {
-                    var item = addressPtr.asSlice(i * rcl_query_address.LAYOUT.byteSize());
-                    rcl_query_address.encoded_VH.set(item, arena.allocateUtf8String(address.get(i)));
-                }
-                rcl_query_t.address_VH.set(query, addressPtr);
-            } else {
-                rcl_query_t.address_VH.set(query, NULL);
-            }
-
-            // topics
-            var tlenM = rcl_query_t.tlen_slice(query);
-            var topicsM = rcl_query_t.topics_slice(query);
-
-            for (int i = 0; i < Constants.TOPICS_LENGTH; ++i) {
-                var size = topics.size();
-                var topicM = topicsM.asSlice(i * Constants.C_POINTER_LAYOUT.byteSize());
-
-                if (size <= i) {
-                    topicM.set(Constants.C_POINTER_LAYOUT, 0, NULL);
-                    tlenM.set(ValueLayout.JAVA_LONG, i * ValueLayout.JAVA_LONG.byteSize(), 0L);
-                } else {
-                    var current = topics.get(i);
-                    var topicPtr = arena.allocateArray(rcl_query_topics.LAYOUT, current.size());
-
-                    for (int j = 0; j < current.size(); ++j) {
-                        var item = topicPtr.asSlice(j * rcl_query_topics.LAYOUT.byteSize());
-                        rcl_query_topics.encoded_VH.set(item, arena.allocateUtf8String(current.get(j)));
+                    // address
+                    long alen = address.size();
+                    rcl_query_t.alen_VH.set(query, alen);
+                    if (alen > 0) {
+                        var addressPtr = arena.allocateArray(rcl_query_address.LAYOUT, alen);
+                        for (int i = 0; i < alen; ++i) {
+                            var item = addressPtr.asSlice(i * rcl_query_address.LAYOUT.byteSize());
+                            rcl_query_address.encoded_VH.set(
+                                    item, arena.allocateUtf8String(address.get(i)));
+                        }
+                        rcl_query_t.address_VH.set(query, addressPtr);
+                    } else {
+                        rcl_query_t.address_VH.set(query, NULL);
                     }
 
-                    topicM.set(Constants.C_POINTER_LAYOUT, 0, topicPtr);
-                    tlenM.set(ValueLayout.JAVA_LONG, i * ValueLayout.JAVA_LONG.byteSize(), topics.get(i).size());
+                    // topics
+                    var tlenM = rcl_query_t.tlen_slice(query);
+                    var topicsM = rcl_query_t.topics_slice(query);
+
+                    for (int i = 0; i < Constants.TOPICS_LENGTH; ++i) {
+                        var size = topics.size();
+                        var topicM = topicsM.asSlice(i * Constants.C_POINTER_LAYOUT.byteSize());
+
+                        if (size <= i) {
+                            topicM.set(Constants.C_POINTER_LAYOUT, 0, NULL);
+                            tlenM.set(ValueLayout.JAVA_LONG, i * ValueLayout.JAVA_LONG.byteSize(),
+                                    0L);
+                        } else {
+                            var current = topics.get(i);
+                            var topicPtr =
+                                    arena.allocateArray(rcl_query_topics.LAYOUT, current.size());
+
+                            for (int j = 0; j < current.size(); ++j) {
+                                var item = topicPtr.asSlice(j * rcl_query_topics.LAYOUT.byteSize());
+                                rcl_query_topics.encoded_VH.set(
+                                        item, arena.allocateUtf8String(current.get(j)));
+                            }
+
+                            topicM.set(Constants.C_POINTER_LAYOUT, 0, topicPtr);
+                            tlenM.set(ValueLayout.JAVA_LONG, i * ValueLayout.JAVA_LONG.byteSize(),
+                                    topics.get(i).size());
+                        }
+                    }
+
+                    // call
+                    var result = arena.allocate(Constants.C_POINTER_LAYOUT);
+
+                    int rc;
+                    try {
+                        rc = (int) rcl_query_MH.invokeExact(connPtr, query, result);
+                    } catch (Throwable ex) {
+                        throw new AssertionError("should not reach here", ex);
+                    }
+                    if (rc != Constants.RCLE_OK) throw exception(rc);
+
+                    return result.get(ValueLayout.JAVA_LONG, 0);
+            }
+        }
+
+        public long GetLogsCount() throws LogsOracleException {
+            try (Arena arena = Arena.openConfined()) {
+                var result = arena.allocate(Constants.C_POINTER_LAYOUT);
+
+                int rc;
+                try {
+                    rc = (int) rcl_logs_count_MH.invokeExact(connPtr, result);
+                } catch (Throwable ex) {
+                    throw new AssertionError("should not reach here", ex);
                 }
+                if (rc != Constants.RCLE_OK) throw exception(rc);
+
+                return result.get(ValueLayout.JAVA_LONG, 0);
             }
+        }
 
-            // call
-            var result = arena.allocate(Constants.C_POINTER_LAYOUT);
+        public long GetBlocksCount() throws LogsOracleException {
+            try (Arena arena = Arena.openConfined()) {
+                var result = arena.allocate(Constants.C_POINTER_LAYOUT);
 
-            int rc;
+                int rc;
+                try {
+                    rc = (int) rcl_blocks_count_MH.invokeExact(connPtr, result);
+                } catch (Throwable ex) {
+                    throw new AssertionError("should not reach here", ex);
+                }
+
+                if (rc != Constants.RCLE_OK) throw exception(rc);
+
+                return result.get(ValueLayout.JAVA_LONG, 0);
+            }
+        }
+
+        @Override
+        public void close() throws IOException {
             try {
-                rc = (int) rcl_query_MH.invokeExact(connPtr, query, result);
+                rcl_free_MH.invokeExact(connPtr);
             } catch (Throwable ex) {
                 throw new AssertionError("should not reach here", ex);
             }
-            if (rc != Constants.RCLE_OK)
-                throw exception(rc);
-
-            return result.get(ValueLayout.JAVA_LONG, 0);
+            connArena.close();
         }
-    }
 
-    public long GetLogsCount() throws LogsOracleException {
-        try (Arena arena = Arena.openConfined()) {
-            var result = arena.allocate(Constants.C_POINTER_LAYOUT);
-
-            int rc;
+        LogsOracleException exception(int code) {
             try {
-                rc = (int) rcl_logs_count_MH.invokeExact(connPtr, result);
+                MemorySegment error = (MemorySegment) rcl_strerror_MH.invokeExact(code);
+                return new LogsOracleException(code, error.getUtf8String(0));
             } catch (Throwable ex) {
                 throw new AssertionError("should not reach here", ex);
             }
-            if (rc != Constants.RCLE_OK)
-                throw exception(rc);
-
-            return result.get(ValueLayout.JAVA_LONG, 0);
         }
-    }
 
-    public long GetBlocksCount() throws LogsOracleException {
-        try (Arena arena = Arena.openConfined()) {
-            var result = arena.allocate(Constants.C_POINTER_LAYOUT);
+        public class LogsOracleException extends Exception {
+            private int code;
 
-            int rc;
-            try {
-                rc = (int) rcl_blocks_count_MH.invokeExact(connPtr, result);
-            } catch (Throwable ex) {
-                throw new AssertionError("should not reach here", ex);
+            public LogsOracleException(int code, String s) {
+                super("liboracle error: " + s);
+                this.code = code;
             }
 
-            if (rc != Constants.RCLE_OK)
-                throw exception(rc);
-
-            return result.get(ValueLayout.JAVA_LONG, 0);
+            public boolean isQueryOverflow() {
+                return code == Constants.RCLE_QUERY_OVERFLOW;
+            }
         }
     }
-
-    @Override
-    public void close() throws IOException {
-        try {
-            rcl_free_MH.invokeExact(connPtr);
-        } catch (Throwable ex) {
-            throw new AssertionError("should not reach here", ex);
-        }
-        connArena.close();
-    }
-
-    LogsOracleException exception(int code) {
-        try {
-            MemorySegment error = (MemorySegment)rcl_strerror_MH.invokeExact(code);
-            return new LogsOracleException(code, error.getUtf8String(0));
-        } catch (Throwable ex) {
-            throw new AssertionError("should not reach here", ex);
-        }
-    }
-
-    public class LogsOracleException extends Exception {
-        private int code;
-
-        public LogsOracleException(int code, String s) {
-            super("liboracle error: " + s);
-            this.code = code;
-        }
-
-        public boolean isQueryOverflow() {
-            return code == Constants.RCLE_QUERY_OVERFLOW;
-        }
-    }
-}

@@ -10,12 +10,8 @@ class Example {
 
             System.out.println("Logs: " + db.GetLogsCount());
             System.out.println("Blocks: " + db.GetBlocksCount());
-            System.out.println("Query: " + db.Query(
-                null,
-                1L, 16L,
-                Collections.emptyList(),
-                Collections.emptyList()
-            ));
+            System.out.println("Query: "
+                    + db.Query(null, 1L, 16L, Collections.emptyList(), Collections.emptyList()));
         }
     }
 }

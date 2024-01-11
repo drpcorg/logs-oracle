@@ -36,14 +36,16 @@ int file_open(file_t* f, const char* filename, size_t size) {
 }
 
 int file_lock(file_t* f) {
-  if (f->locked) return 0;
+  if (f->locked)
+    return 0;
 
   f->locked = true;
   return mlock(f->buffer, f->bytes) == 0 ? 0 : -1;
 }
 
 int file_unlock(file_t* f) {
-  if (!f->locked) return 0;
+  if (!f->locked)
+    return 0;
 
   return munlock(f->buffer, f->bytes) == 0 ? 0 : -1;
 }

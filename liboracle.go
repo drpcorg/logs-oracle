@@ -35,7 +35,7 @@ type Conn struct {
 
 func rcl_error(code C.rcl_result) error {
 	if code == C.RCLE_OK {
-		return nil;
+		return nil
 	}
 
 	return fmt.Errorf("liboracle error: " + C.GoString(C.rcl_strerror(code)))

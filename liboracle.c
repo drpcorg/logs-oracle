@@ -54,8 +54,8 @@ static int rcl_page_filename(rcl_filepath_t filename,
                              const char* dirname,
                              int64_t index,
                              char part) {
-  int count = snprintf(filename, PATH_MAX, "%s/%02" PRIx64 ".%c.rcl",
-                       dirname, index, part);
+  int count = snprintf(filename, PATH_MAX, "%s/%02" PRIx64 ".%c.rcl", dirname,
+                       index, part);
 
   if (rcl_unlikely(count < 0 || count >= PATH_MAX)) {
     return -1;
@@ -79,7 +79,7 @@ struct rcl {
   int64_t ram_limit;
   rcl_filepath_t dir;
 
-  rcl_upstream_t *upstream;
+  rcl_upstream_t* upstream;
 
   // DB state
   FILE* manifest;
@@ -344,8 +344,7 @@ rcl_result rcl_open(char* dir, int64_t ram_limit, rcl_t** db_ptr) {
   }
 
   rcl_filepath_t state_filename = {0};
-  int count =
-      snprintf(state_filename, PATH_MAX, "%s/%s", self->dir, "toc.txt");
+  int count = snprintf(state_filename, PATH_MAX, "%s/%s", self->dir, "toc.txt");
   if (rcl_unlikely(count < 0 || count >= PATH_MAX)) {
     return RCLE_UNKNOWN;
   }
@@ -395,26 +394,12 @@ void rcl_free(rcl_t* self) {
 }
 
 rcl_result rcl_update_height(rcl_t* self, int64_t height) {
-  rcl_result result = rcl_upstream_set_height(self->upstream, height);
-  if (result != RCLE_OK) return result;
-
-  int rc;
-  if ((rc = pthread_rwlock_wrlock(&(self->lock)))) {
-    rcl_error("failed lock mutex, code %i\n", rc);
-    return RCLE_UNKNOWN;
-  }
-
-  result = rcl_state_write(self);
-
-  if ((rc = pthread_rwlock_unlock(&(self->lock)))) {
-    rcl_error("failed unlock mutex, code %i\n", rc);
-    return RCLE_UNKNOWN;
-  }
-
-  return result;
+  rcl_info("set height: %" PRId64 "\n", height);
+  return rcl_upstream_set_height(self->upstream, height);
 }
 
 rcl_result rcl_set_upstream(rcl_t* self, const char* upstream) {
+  rcl_info("set upstream: %s\n", upstream);
   return rcl_upstream_set_url(self->upstream, upstream);
 }
 
@@ -453,7 +438,8 @@ rcl_result rcl_insert(rcl_t* self, size_t size, rcl_log_t* logs) {
     size_t count = 0;
     for (; log != end && log->block_number == block_number; ++log) {
       int64_t page, offset;
-      get_position(self->logs_count + count, LOGS_PAGE_CAPACITY, &page, &offset);
+      get_position(self->logs_count + count, LOGS_PAGE_CAPACITY, &page,
+                   &offset);
 
       if (self->data_pages.size <= page) {
         if (rcl_open_data_page(self) != 0) {

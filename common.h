@@ -72,6 +72,14 @@
     fflush(stderr);                                                            \
   } while (false)
 
+#define rcl_info(...)                                            \
+  do {                                                           \
+    fprintf(stdout, "INFO [%s:%d -> %s]:\t", __FILE__, __LINE__, \
+            CURRENT_FUNC);                                       \
+    fprintf(stdout, __VA_ARGS__);                                \
+    fflush(stdout);                                              \
+  } while (false)
+
 #ifdef DEBUG
 #define rcl_debug(...)                                                         \
   do {                                                                         \
@@ -80,10 +88,17 @@
     fflush(stderr);                                                            \
   } while (false)
 #else
-#define rcl_debug(...) do {} while (false)
+#define rcl_debug(...) \
+  do {                 \
+  } while (false)
 #endif
 
-#define return_err(code, ...) do { exit_code = code; rcl_error(__VA_ARGS__); goto exit; } while(false);
+#define return_err(code, ...) \
+  do {                        \
+    exit_code = code;         \
+    rcl_error(__VA_ARGS__);   \
+    goto exit;                \
+  } while (false);
 
 // bloom filter
 enum { LOGS_BLOOM_SIZE = 256 };

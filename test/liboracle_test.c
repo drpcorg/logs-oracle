@@ -154,10 +154,10 @@ rcl_t* db_make_filled(void) {
 }
 
 int64_t db_make_query(rcl_t* db,
-                       int64_t from,
-                       int64_t to,
-                       vector_t ad,
-                       vector_t tpcs[TOPICS_LENGTH]) {
+                      int64_t from,
+                      int64_t to,
+                      vector_t ad,
+                      vector_t tpcs[TOPICS_LENGTH]) {
   size_t tlen[TOPICS_LENGTH] = {0};
   for (size_t i = 0; i < TOPICS_LENGTH; ++i)
     tlen[i] = tpcs[i].size;
