@@ -214,7 +214,7 @@ static rcl_result rcl_state_read(rcl_t* t) {
   if (err != 0)
     return RCLE_FILESYSTEM;
 
-  int count = fscanf(t->manifest, "%" PRIu64 " %" PRIu64 "", &t->blocks_count,
+  int count = fscanf(t->manifest, "%" PRId64 " %" PRId64 "", &t->blocks_count,
                      &t->logs_count);
 
   if (count != 2)
@@ -227,16 +227,20 @@ static rcl_result rcl_state_read(rcl_t* t) {
 }
 
 static rcl_result rcl_state_write(rcl_t* t) {
-  if (fseek(t->manifest, 0, SEEK_SET) != 0)
+  if (fseek(t->manifest, 0, SEEK_SET) != 0) {
+    rcl_perror("state fseek");
     return RCLE_FILESYSTEM;
+  }
 
-  int bytes = fprintf(t->manifest, "%" PRIu64 " %" PRIu64 "", t->blocks_count,
+  int bytes = fprintf(t->manifest, "%" PRId64 " %" PRId64 "", t->blocks_count,
                       t->logs_count);
   if (bytes <= 0)
     return RCLE_FILESYSTEM;
 
-  if (fflush(t->manifest) != 0)
+  if (fflush(t->manifest) != 0) {
+    rcl_perror("state fflush");
     return RCLE_FILESYSTEM;
+  }
 
   rcl_debug("writed state: blocks = %zu, logs = %zu\n", t->blocks_count,
             t->logs_count);
@@ -394,12 +398,10 @@ void rcl_free(rcl_t* self) {
 }
 
 rcl_result rcl_update_height(rcl_t* self, int64_t height) {
-  rcl_info("set height: %" PRId64 "\n", height);
   return rcl_upstream_set_height(self->upstream, height);
 }
 
 rcl_result rcl_set_upstream(rcl_t* self, const char* upstream) {
-  rcl_info("set upstream: %s\n", upstream);
   return rcl_upstream_set_url(self->upstream, upstream);
 }
 
