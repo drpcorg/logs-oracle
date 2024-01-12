@@ -1,3 +1,4 @@
+# CFLAGS="-march=x86-64-v4" 
 CFLAGS+=-std=gnu11 -mtune=generic -pipe -pthread
 
 CFLAGS+=$(shell pkg-config --cflags libcurl libcjson)
