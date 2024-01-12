@@ -504,7 +504,7 @@ static rcl_result rcl_upstream_process(rcl_upstream_t* self,
         self->requests_head = (self->requests_head + 1) % CONNECTIONS_COUNT;
 
         if (req->to > self->last)
-          self->last = req->to;
+          self->last = min(req->to, self->height);
 
         --(*inprogress);
 
