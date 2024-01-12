@@ -237,11 +237,6 @@ static rcl_result rcl_state_write(rcl_t* t) {
   if (bytes <= 0)
     return RCLE_FILESYSTEM;
 
-  if (fflush(t->manifest) != 0) {
-    rcl_perror("state fflush");
-    return RCLE_FILESYSTEM;
-  }
-
   rcl_debug("writed state: blocks = %zu, logs = %zu\n", t->blocks_count,
             t->logs_count);
 
@@ -376,7 +371,14 @@ void rcl_free(rcl_t* self) {
   pthread_rwlock_wrlock(&(self->lock));
 
   (void)rcl_state_write(self);
-  fclose(self->manifest);
+
+  if (fflush(self->manifest)) {
+    rcl_perror("state fflush");
+  }
+
+  if (fclose(self->manifest)) {
+    rcl_perror("fclose manifest");
+  }
 
   for (int64_t i = 0; i < self->blocks_pages.size; ++i) {
     file_t* it = (file_t*)(vector_remove_last(&(self->blocks_pages)));
