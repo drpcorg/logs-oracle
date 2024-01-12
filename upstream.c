@@ -534,7 +534,7 @@ static rcl_result rcl_upstream_poll(rcl_upstream_t* self) {
   if (multi_handle == NULL)
     return RCLE_LIBCURL;
 
-  rcl_debug("start new poll from %zu\n", start);
+  rcl_info("start new poll from %zu\n", start);
 
   if ((rc = rcl_upstream_send(self, multi_handle, &start, &inprogress)))
     goto exit;
@@ -578,7 +578,7 @@ static rcl_result rcl_upstream_poll(rcl_upstream_t* self) {
     goto exit;
 
 exit:
-  rcl_debug("end poll\n");
+  rcl_info("end poll\n");
   curl_multi_cleanup(multi_handle);
   return rc;
 }
@@ -586,17 +586,17 @@ exit:
 static void* rcl_upstream_thrd(void* data) {
   rcl_upstream_t* self = data;
 
-  rcl_debug("start fetcher thread\n");
+  rcl_info("start fetcher thread\n");
 
   while (!self->closed) {
     if (self->height == 0 || self->url == NULL) {
-      rcl_debug("wait height and URL...\n");
+      rcl_info("wait height and URL...\n");
       sleep(1);
       continue;
     }
 
     if (self->last >= self->height) {
-      rcl_debug("nothing to download, height: %zu, last: %zu\n", self->height,
+      rcl_info("nothing to download, height: %zu, last: %zu\n", self->height,
                 self->last);
       sleep(1);
       continue;
@@ -609,7 +609,7 @@ static void* rcl_upstream_thrd(void* data) {
     }
   }
 
-  rcl_debug("exit fetcher thread\n");
+  rcl_info("exit fetcher thread\n");
 
   pthread_exit(0);
 }

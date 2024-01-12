@@ -73,8 +73,6 @@ void rcl_page_destroy(rcl_page_t* page) {
 static uint32_t HASH_SEED = 1907531730ul;
 
 struct rcl {
-  pthread_rwlock_t lock;
-
   // Config
   int64_t ram_limit;
   rcl_filepath_t dir;
@@ -83,7 +81,7 @@ struct rcl {
 
   // DB state
   FILE* manifest;
-  int64_t blocks_count, logs_count;
+  atomic_size_t blocks_count, logs_count;
 
   // Data pages
   vector_t blocks_pages;  // <file_t>
@@ -171,9 +169,9 @@ static rcl_block_t* rcl_get_block(rcl_t* self, int64_t number) {
 }
 
 static int rcl_add_block(rcl_t* self, int64_t block_number) {
-  for (; self->blocks_count <= block_number;) {
+  for (size_t i = self->blocks_count;i <= block_number; ++i) {
     int64_t page, offset;
-    get_position(self->blocks_count, BLOCKS_FILE_CAPACITY, &page, &offset);
+    get_position(i, BLOCKS_FILE_CAPACITY, &page, &offset);
 
     if (self->blocks_pages.size <= page) {
       int status = rcl_open_blocks_page(self);
@@ -188,7 +186,7 @@ static int rcl_add_block(rcl_t* self, int64_t block_number) {
     blocks[offset].offset = 0;
     bloom_init(blocks[offset].logs_bloom);
 
-    if (self->blocks_count != 0) {
+    if (i != 0) {
       rcl_block_t* last;
 
       if (offset == 0) {
@@ -202,8 +200,6 @@ static int rcl_add_block(rcl_t* self, int64_t block_number) {
 
       blocks[offset].offset = last->offset + last->logs_count;
     }
-
-    ++self->blocks_count;
   }
 
   return 0;
@@ -214,8 +210,11 @@ static rcl_result rcl_state_read(rcl_t* t) {
   if (err != 0)
     return RCLE_FILESYSTEM;
 
-  int count = fscanf(t->manifest, "%" PRId64 " %" PRId64 "", &t->blocks_count,
-                     &t->logs_count);
+  size_t blocks, logs;
+  int count = fscanf(t->manifest, "%" PRId64 " %" PRId64 "", &blocks, &logs);
+
+  t->blocks_count = blocks;
+  t->logs_count = logs;
 
   if (count != 2)
     return RCLE_FILESYSTEM;
@@ -236,6 +235,11 @@ static rcl_result rcl_state_write(rcl_t* t) {
                       t->logs_count);
   if (bytes <= 0)
     return RCLE_FILESYSTEM;
+
+  if (fflush(t->manifest)) {
+    rcl_perror("state fflush");
+    return RCLE_FILESYSTEM;
+  }
 
   rcl_debug("writed state: blocks = %zu, logs = %zu\n", t->blocks_count,
             t->logs_count);
@@ -331,10 +335,6 @@ rcl_result rcl_open(char* dir, int64_t ram_limit, rcl_t** db_ptr) {
 
   *db_ptr = self;
 
-  if (pthread_rwlock_init(&(self->lock), NULL) != 0) {
-    return RCLE_UNKNOWN;
-  }
-
   self->ram_limit = ram_limit;
 
   if (realpath(dir, self->dir) == NULL) {
@@ -368,8 +368,6 @@ rcl_result rcl_open(char* dir, int64_t ram_limit, rcl_t** db_ptr) {
 void rcl_free(rcl_t* self) {
   rcl_upstream_free(self->upstream);
 
-  pthread_rwlock_wrlock(&(self->lock));
-
   (void)rcl_state_write(self);
 
   if (fflush(self->manifest)) {
@@ -393,9 +391,6 @@ void rcl_free(rcl_t* self) {
   vector_destroy(&(self->blocks_pages));
   vector_destroy(&(self->data_pages));
 
-  pthread_rwlock_unlock(&(self->lock));
-  pthread_rwlock_destroy(&(self->lock));
-
   free(self);
 }
 
@@ -413,11 +408,6 @@ rcl_result rcl_insert(rcl_t* self, size_t size, rcl_log_t* logs) {
 
   if (size == 0)
     return RCLE_OK;
-
-  if ((rc = pthread_rwlock_wrlock(&(self->lock)))) {
-    rcl_error("failed lock mutex, code %i\n", rc);
-    return RCLE_UNKNOWN;
-  }
 
   for (rcl_log_t *log = logs, *end = logs + size; log != end;) {
     int64_t block_number = log->block_number;
@@ -469,17 +459,15 @@ rcl_result rcl_insert(rcl_t* self, size_t size, rcl_log_t* logs) {
     }
 
     block->logs_count += count;
+
+    // mutex is not required as they are atomics
     self->logs_count += count;
+    self->blocks_count = block_number + 1;
   }
 
 error:
   if ((rc = rcl_state_write(self)) != RCLE_OK)
     result = rc;
-
-  if ((rc = pthread_rwlock_unlock(&(self->lock)))) {
-    rcl_error("failed unlock mutex, code %i\n", rc);
-    return RCLE_UNKNOWN;
-  }
 
   return result;
 }
@@ -563,18 +551,8 @@ rcl_result rcl_query(rcl_t* self, rcl_query_t* query, int64_t* result) {
   int rc;
 
   // pre-check
-  if ((rc = pthread_rwlock_rdlock(&(self->lock)))) {
-    rcl_error("failed lock mutex, code %i\n", rc);
-    return RCLE_UNKNOWN;
-  }
-
-  int64_t blocks_count = self->blocks_count;
-  int64_t logs_count = self->logs_count;
-
-  if ((rc = pthread_rwlock_unlock(&(self->lock)))) {
-    rcl_error("failed unlock mutex, code %i\n", rc);
-    return RCLE_UNKNOWN;
-  }
+  size_t blocks_count = self->blocks_count;
+  size_t logs_count = self->logs_count;
 
   if (blocks_count == 0 || logs_count == 0)
     return RCLE_OK;
@@ -610,14 +588,9 @@ rcl_result rcl_query(rcl_t* self, rcl_query_t* query, int64_t* result) {
   }
 
   // calc
-  if ((rc = pthread_rwlock_rdlock(&(self->lock)))) {
-    rcl_error("failed lock mutex, code %i\n", rc);
-    return RCLE_UNKNOWN;
-  }
-
   int64_t start = query->from, end = query->to;
-  if (end >= self->blocks_count)
-    end = self->blocks_count - 1;
+  if (end >= blocks_count)
+    end = blocks_count - 1;
 
   for (size_t number = start; number <= end; ++number) {
     rcl_block_t* block = rcl_get_block(self, number);
@@ -645,46 +618,15 @@ rcl_result rcl_query(rcl_t* self, rcl_query_t* query, int64_t* result) {
     }
   }
 
-  if ((rc = pthread_rwlock_unlock(&(self->lock)))) {
-    rcl_error("failed unlock mutex, code %i\n", rc);
-    return RCLE_UNKNOWN;
-  }
-
   return RCLE_OK;
 }
 
 rcl_result rcl_blocks_count(rcl_t* self, int64_t* result) {
-  int rc;
-
-  if ((rc = pthread_rwlock_rdlock(&(self->lock)))) {
-    rcl_error("failed lock mutex, code %i\n", rc);
-    return RCLE_UNKNOWN;
-  }
-
   *result = self->blocks_count;
-
-  if ((rc = pthread_rwlock_unlock(&(self->lock)))) {
-    rcl_error("failed unlock mutex, code %i\n", rc);
-    return RCLE_UNKNOWN;
-  }
-
   return RCLE_OK;
 }
 
 rcl_result rcl_logs_count(rcl_t* self, int64_t* result) {
-  int rc;
-
-  if ((rc = pthread_rwlock_rdlock(&(self->lock)))) {
-    rcl_error("failed lock mutex, code %i\n", rc);
-    return RCLE_UNKNOWN;
-  }
-
   *result = self->logs_count;
-
-  if ((rc = pthread_rwlock_unlock(&(self->lock)))) {
-    rcl_error("failed unlock mutex, code %i\n", rc);
-    return RCLE_UNKNOWN;
-  }
-
   return RCLE_OK;
 }
