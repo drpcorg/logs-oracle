@@ -1,14 +1,8 @@
-*.o
-*.d
-*.a
-*.so
+build/
 
 *.class
 *.jar
-
-
-libtest
-*.test
+jextract 
 
 **/.env
 **/_data

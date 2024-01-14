@@ -19,8 +19,7 @@ jobs:
       matrix:
         os: [ "ubuntu-latest", "macos-latest" ]
         compiler:
-          # TODO: fix build with gcc
-          # - { compiler: GNU,  CC: gcc }
+          - { compiler: GNU,  CC: gcc }
           - { compiler: LLVM, CC: clang }
     steps:
       - name: Checkout repository
@@ -42,23 +41,25 @@ jobs:
         run: |
           sudo apt update
           sudo apt-get install -y \
-            gcc-12 clang-15 \
+            cmake gcc-12 clang-15 \
             libcjson-dev libcurl4-openssl-dev libcriterion-dev
 
       - name: Install dependencies for Mac
         if: matrix.os == 'macos-latest'
         run: |
-          brew install gcc@12 llvm@15 criterion curl cjson
+          brew install cmake gcc@12 llvm@15 criterion curl cjson
 
           ln -s "$(brew --prefix llvm@15)/bin/clang-format" "/usr/local/bin/clang-format"
           ln -s "$(brew --prefix llvm@15)/bin/clang-tidy" "/usr/local/bin/clang-tidy"
           ln -s "$(brew --prefix llvm@15)/bin/clang-apply-replacements" "/usr/local/bin/clang-apply-replacements"
 
-      - name: Test liboracle
-        run: make libtest
+      - name: Test liblogsoracle
+        run: |
+          make TYPE=Release GENERATOR="Unix Makefiles" cmake Release
+          cd build/Release && make test
         env: { CC: "${{ matrix.compiler.CC }}" }
 
-      - name: Lint liboracle
+      - name: Lint liblogsoracle
         run: make lint
         env: { CC: "${{ matrix.compiler.CC }}" }
 

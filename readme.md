@@ -1,4 +1,4 @@
-# DRPC Logs Oracle ![Test](https://github.com/p2p-org/drpc-logs-oracle/actions/workflows/test.yml/badge.svg)
+# DRPC LogsOracle ![Test](https://github.com/p2p-org/drpc-logs-oracle/actions/workflows/test.yml/badge.svg)
 
 It's a cache answering the question "how many logs will be in the request to the node".
 

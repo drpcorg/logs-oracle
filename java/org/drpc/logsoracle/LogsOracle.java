@@ -108,7 +108,7 @@ public class LogsOracle implements AutoCloseable {
 
     static {
         try {
-            String lib_filename = "/liboracle-";
+            String lib_filename = "/liblogsoracle-";
 
             lib_filename += switch (System.getProperty("os.arch").toLowerCase().trim()) {
                 case "x86_64", "amd64" -> "x86_64";
@@ -134,7 +134,7 @@ public class LogsOracle implements AutoCloseable {
                 throw new IOException(lib_packed + " not found");
             }
 
-            Path lib_file = Files.createTempFile("liboracle_java_native", ".dynlib");
+            Path lib_file = Files.createTempFile("liblogsoracle", ".so");
             Files.copy(lib_packed.openStream(), lib_file, StandardCopyOption.REPLACE_EXISTING);
             new File(lib_file.toString()).deleteOnExit();
 

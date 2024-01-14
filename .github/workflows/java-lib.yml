@@ -11,42 +11,48 @@ jobs:
     steps:
     - uses: actions/checkout@v3
     - run: |
-        brew install llvm@15
+        brew install llvm@15 cmake
         brew fetch --force --arch=arm curl cjson
         brew fetch --force --arch=intel curl cjson
 
-    - run: |
+    - env: { CC: "clang -arch arm64" }
+      run: |
         brew reinstall $(brew --cache --arch=arm curl cjson)
-        make CFLAGS="-arch arm64" -j $(nproc) clean liboracle.so 
-        mv liboracle.so liboracle-arm64-macos.dylib
-    - run: |
+        make TYPE=Release clean cmake
+        cmake -t logsoracle --build build/Release
+        mv build/Release/liblogsoracle.so liblogsoracle-arm64-macos.dylib
+
+    - env: { CC: "clang -arch x86_64" }
+      run: |
         brew reinstall $(brew --cache --arch=intel curl cjson)
-        make CFLAGS="-arch x86_64" -j $(nproc) clean liboracle.so 
-        mv liboracle.so liboracle-x86_64-macos.dylib
+        make TYPE=Release clean cmake
+        cmake -t logsoracle --build build/Release
+        mv build/Release/liblogsoracle.so liblogsoracle-x86_64-macos.dylib
 
     - uses: actions/upload-artifact@v3
       with:
-        name: liboracle-macos
-        path: liboracle-*-macos.dylib
+        name: liblogsoracle-macos
+        path: liblogsoracle-*-macos.dylib
 
   build-linux-so:
     name:  Build dylib for linux
     runs-on: ubuntu-latest
-    env: { CC: "clang" }
     steps:
     - uses: actions/checkout@v3
     - run: |
         sudo apt-get update
-        sudo apt-get install -y clang-12 libcjson-dev libcurl4-openssl-dev
+        sudo apt-get install -y cmake clang-12 libcjson-dev libcurl4-openssl-dev
 
-    - run: |
-        make -j $(nproc) liboracle.so 
-        mv liboracle.so liboracle-x86_64-linux.so
+    - env: { CC: "clang -march=x86-64-v4" } 
+      run: |
+        make TYPE=Release clean cmake Release
+        cmake -t logsoracle --build build/Release
+        mv build/Release/liblogsoracle.so liblogsoracle-x86_64-linux.so
 
     - uses: actions/upload-artifact@v3
       with:
-        name: liboracle-linux
-        path: liboracle-x86_64-linux.so
+        name: liblogsoracle-linux
+        path: liblogsoracle-x86_64-linux.so
 
   build-jar:
     name: Build jar
@@ -60,15 +66,20 @@ jobs:
         java-version: 20
 
     - uses: actions/download-artifact@v3
-      with: { name: 'liboracle-macos' }
+      with: { name: 'liblogsoracle-macos' }
     - uses: actions/download-artifact@v3
-      with: { name: 'liboracle-linux' }
+      with: { name: 'liblogsoracle-linux' }
 
     - run: make java/LogsOracle.jar
     - run: |
-        jar uf java/LogsOracle.jar liboracle-x86_64-linux.so
-        jar uf java/LogsOracle.jar liboracle-x86_64-macos.dylib
-        jar uf java/LogsOracle.jar liboracle-arm64-macos.dylib
+        jar uf java/LogsOracle.jar liblogsoracle-x86_64-linux.so
+        jar uf java/LogsOracle.jar liblogsoracle-x86_64-macos.dylib
+        jar uf java/LogsOracle.jar liblogsoracle-arm64-macos.dylib
+
+    - name: Check JAR
+      run: |
+        mkdir -p _data
+        java --source=20 --enable-preview -cp ".:java/LogsOracle.jar" java/Example.java
 
     - uses: actions/upload-artifact@v3
       with:
