@@ -28,10 +28,12 @@ java/LogsOracle.jar: $(JAVA_SRC)
 	cd java && \
 		jar cf $(@:java/%=%) org/drpc/logsoracle/*.class
 
+SONAME := $(shell echo liblogsoracle-$(shell uname -m)-$(shell uname -s).so | tr '[:upper:]' '[:lower:]')
+
 .PHONY: java-example
-java-example: cmake $(TYPE) java/LogsOracle.jar
-	cp $(BUILD_DIR)/liblogsoracle.so $(BUILD_DIR)/liblogsoracle-$(shell uname -m)-linux.so
-	jar uf java/LogsOracle.jar -C $(BUILD_DIR) liblogsoracle-$(shell uname -m)-linux.so
+java-example: java/LogsOracle.jar
+	cp $(BUILD_DIR)/liblogsoracle.so $(BUILD_DIR)/$(SONAME)
+	jar uf java/LogsOracle.jar -C $(BUILD_DIR) $(SONAME)
 	mkdir -p _data && java --source=20 --enable-preview -cp ".:java/LogsOracle.jar" java/Example.java
 
 # Utils

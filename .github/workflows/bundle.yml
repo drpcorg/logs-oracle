@@ -1,0 +1,145 @@
+name: Build and test
+
+on:
+  push:
+    branches: [ main, 'v0.[0-9]+' ]
+  pull_request:
+    branches: [ main, 'v0.[0-9]+' ]
+
+permissions:
+  contents: read
+
+jobs:
+  static:
+    name: Static analysis
+    runs-on: "ubuntu-latest"
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt-get install -y clang-15 \
+            libcjson-dev libcurl4-openssl-dev libcriterion-dev
+
+      - name: Lint liblogsoracle
+        run: make lint
+
+  macos:
+    name: "MacOS: x86_64 & arm64 / clang"
+    runs-on: "macos-latest"
+    needs: ['static']
+    env: {CC: "clang"}
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Install Go toolchain
+      uses: actions/setup-go@v4
+      with: {check-latest: true, go-version: '1.21'}
+    - name: Install Java toolchain
+      uses: actions/setup-java@v4
+      with: {distribution: 'zulu', java-version: '20'}
+    - name: Install dependencies
+      run: |
+        brew fetch --force --arch=all curl cjson criterion 
+
+    - name: Build shared lib
+      run: |
+        for arch in 'arm64' 'x86_64'; do
+          case "$arch" in
+           'arm64')  BARCH="arm" ;;
+           'x86_64') BARCH="intel" ;;
+          esac
+
+          brew reinstall $(brew --cache --arch="${BARCH}" curl cjson criterion)
+
+          mkdir -p build/$arch
+          CFLAGS="-arch $arch" \
+            cmake -S . -B=build/$arch -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=On
+          cmake --build build/$arch
+
+          cp build/$arch/liblogsoracle.dylib "liblogsoracle-$arch-macos.dylib"
+        done
+    - name: Test shared lib
+      run: cd build/x86_64 && make test
+    - name: Build doracle
+      run: make doracle-build
+    - name: Check JAR
+      run: |
+        make java/LogsOracle.jar
+        jar uf java/LogsOracle.jar "liblogsoracle-x86_64-macos.dylib"
+        mkdir -p _data && java --source=20 --enable-preview -cp ".:java/LogsOracle.jar" java/Example.java
+
+    - uses: actions/upload-artifact@v3
+      with:
+        name: liblogsoracle_macos_clang
+        path: liblogsoracle-*
+
+  linux:
+    name: "Linux: ${{ matrix.arch }} / ${{ matrix.cc }}"
+    runs-on: "ubuntu-latest"
+    needs: ['static']
+    strategy:
+      matrix:
+        cc: [gcc, clang]
+        arch: [x86_64]
+    env:
+      CC: "${{ matrix.cc }}"
+      CFLAGS: "-march=x86-64-v3"
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Install Go toolchain
+      uses: actions/setup-go@v4
+      with: {check-latest: true, go-version: '1.21'}
+    - name: Install Java toolchain
+      uses: actions/setup-java@v4
+      with: {distribution: 'zulu', java-version: '20'}
+    - name: Install dependencies
+      run: |
+        sudo apt update && sudo apt-get install -y \
+          cmake gcc-12 clang-15 libcjson-dev libcurl4-openssl-dev libcriterion-dev
+
+    - name: Build shared lib
+      run: |
+        make TYPE=Release cmake Release
+        cp build/Release/liblogsoracle.so "liblogsoracle-x86_64-linux.so"
+    - name: Test shared lib
+      run: cd build/Release && make test
+    - name: Build doracle
+      run: make doracle-build
+    - name: Check JAR
+      run: make java-example
+
+    - uses: actions/upload-artifact@v3
+      with:
+        name: liblogsoracle_linux_${{matrix.cc}}
+        path: liblogsoracle-*-linux.so
+
+  pack-jar:
+    name: Pack jar
+    needs: ['linux', 'macos']
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - uses: actions/setup-java@v3 
+      with:
+        distribution: 'zulu'
+        java-version: 20
+
+    - uses: actions/download-artifact@v3
+      with: { name: 'liblogsoracle_macos_clang' }
+    - uses: actions/download-artifact@v3
+      with: { name: 'liblogsoracle_linux_clang' }
+
+    - run: |
+        make java/LogsOracle.jar
+
+        jar uf java/LogsOracle.jar liblogsoracle-x86_64-linux.so
+        jar uf java/LogsOracle.jar liblogsoracle-x86_64-macos.dylib
+        jar uf java/LogsOracle.jar liblogsoracle-arm64-macos.dylib
+  
+    - uses: actions/upload-artifact@v3
+      with:
+        name: LogsOracle.jar
+        path: java/LogsOracle.jar
