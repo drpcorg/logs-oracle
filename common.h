@@ -80,7 +80,7 @@
     fflush(stdout);                                              \
   } while (false)
 
-#ifdef NDEBUG
+#ifndef NDEBUG
 #define rcl_debug(...)                                                         \
   do {                                                                         \
     fprintf(stderr, "DBG [%s:%d -> %s]:\t", __FILE__, __LINE__, CURRENT_FUNC); \
