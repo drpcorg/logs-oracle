@@ -1,0 +1,12 @@
+prefix=/usr/local
+exec_prefix=/usr/local
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: logs_oracle
+Description: lib for estimating the number of logs in eth_getLogs request
+Version: 1.0
+
+Requires:
+Libs:     -L${libdir} -llogsoracle
+Cflags:   -I${includedir}
