@@ -6,7 +6,7 @@ BUILD_DIR=build/$(TYPE)
 all: cmake
 cmake:
 	mkdir -p $(BUILD_DIR)
-	cmake -S . -B=$(BUILD_DIR) -G"$(GENERATOR)" -DCMAKE_BUILD_TYPE=$(TYPE) -DBUILD_SHARED_LIBS=On
+	cmake -S . -B=$(BUILD_DIR) -G"$(GENERATOR)" -DCMAKE_BUILD_TYPE=$(TYPE) -DBUILD_SHARED_LIBS=On -DCMAKE_EXPORT_COMPILE_COMMANDS=1
 
 %:
 	cmake --build build/$@

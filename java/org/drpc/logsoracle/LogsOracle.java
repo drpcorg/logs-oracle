@@ -4,12 +4,10 @@ import static java.lang.foreign.MemorySegment.*;
 import static java.lang.foreign.ValueLayout.*;
 
 import java.io.*;
-import java.lang.UnsupportedOperationException;
 import java.lang.foreign.*;
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.VarHandle;
 import java.net.URL;
-import java.nio.ByteOrder;
 import java.nio.file.*;
 import java.util.List;
 
@@ -159,44 +157,44 @@ public class LogsOracle implements AutoCloseable {
     }
 
     static final MethodHandle rcl_open_MH = downcallHandle("rcl_open",
-        FunctionDescriptor.of(
-            Constants.C_INT_LAYOUT,
-            Constants.C_POINTER_LAYOUT,
-            Constants.C_LONG_LONG_LAYOUT,
-            Constants.C_POINTER_LAYOUT));
+            FunctionDescriptor.of(
+                    Constants.C_INT_LAYOUT,
+                    Constants.C_POINTER_LAYOUT,
+                    Constants.C_LONG_LONG_LAYOUT,
+                    Constants.C_POINTER_LAYOUT));
     static final MethodHandle rcl_free_MH = downcallHandle("rcl_free",
-        FunctionDescriptor.ofVoid(
-            Constants.C_POINTER_LAYOUT));
+            FunctionDescriptor.ofVoid(
+                    Constants.C_POINTER_LAYOUT));
     static final MethodHandle rcl_update_height_MH = downcallHandle("rcl_update_height",
-        FunctionDescriptor.of(
-            Constants.C_INT_LAYOUT,
-            Constants.C_POINTER_LAYOUT,
-            Constants.C_LONG_LONG_LAYOUT));
+            FunctionDescriptor.of(
+                    Constants.C_INT_LAYOUT,
+                    Constants.C_POINTER_LAYOUT,
+                    Constants.C_LONG_LONG_LAYOUT));
     static final MethodHandle rcl_set_upstream_MH = downcallHandle("rcl_set_upstream",
-        FunctionDescriptor.of(
-            Constants.C_INT_LAYOUT,
-            Constants.C_POINTER_LAYOUT,
-            Constants.C_POINTER_LAYOUT));
+            FunctionDescriptor.of(
+                    Constants.C_INT_LAYOUT,
+                    Constants.C_POINTER_LAYOUT,
+                    Constants.C_POINTER_LAYOUT));
     static final MethodHandle rcl_query_MH = downcallHandle("rcl_query",
-        FunctionDescriptor.of(
-            Constants.C_INT_LAYOUT,
-            Constants.C_POINTER_LAYOUT,
-            Constants.C_POINTER_LAYOUT,
-            Constants.C_POINTER_LAYOUT));
+            FunctionDescriptor.of(
+                    Constants.C_INT_LAYOUT,
+                    Constants.C_POINTER_LAYOUT,
+                    Constants.C_POINTER_LAYOUT,
+                    Constants.C_POINTER_LAYOUT));
     static final MethodHandle rcl_logs_count_MH = downcallHandle("rcl_logs_count",
-        FunctionDescriptor.of(
-            Constants.C_INT_LAYOUT,
-            Constants.C_POINTER_LAYOUT,
-            Constants.C_POINTER_LAYOUT));
+            FunctionDescriptor.of(
+                    Constants.C_INT_LAYOUT,
+                    Constants.C_POINTER_LAYOUT,
+                    Constants.C_POINTER_LAYOUT));
     static final MethodHandle rcl_blocks_count_MH = downcallHandle("rcl_blocks_count",
-        FunctionDescriptor.of(
-            Constants.C_INT_LAYOUT,
-            Constants.C_POINTER_LAYOUT,
-            Constants.C_POINTER_LAYOUT));
+            FunctionDescriptor.of(
+                    Constants.C_INT_LAYOUT,
+                    Constants.C_POINTER_LAYOUT,
+                    Constants.C_POINTER_LAYOUT));
     static final MethodHandle rcl_strerror_MH = downcallHandle("rcl_strerror",
-        FunctionDescriptor.of(
-            Constants.C_POINTER_LAYOUT,
-            Constants.C_INT_LAYOUT));
+            FunctionDescriptor.of(
+                    Constants.C_POINTER_LAYOUT,
+                    Constants.C_INT_LAYOUT));
 
     public LogsOracle(String dir, long ram_limit) throws LogsOracleException {
         try (Arena arena = Arena.openConfined()) {
@@ -244,11 +242,10 @@ public class LogsOracle implements AutoCloseable {
     }
 
     public long Query(
-        Long limit,
-        long fromBlock, long toBlock,
-        List<String> address,
-        List<List<String>> topics
-    ) throws LogsOracleException {
+            Long limit,
+            long fromBlock, long toBlock,
+            List<String> address,
+            List<List<String>> topics) throws LogsOracleException {
         try (Arena arena = Arena.openConfined()) {
             var query = arena.allocate(rcl_query_t.LAYOUT);
 
