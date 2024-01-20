@@ -597,7 +597,7 @@ static void* rcl_upstream_thrd(void* data) {
 
     if (self->last >= self->height) {
       rcl_info("nothing to download, height: %zu, last: %zu\n", self->height,
-                self->last);
+               self->last);
       sleep(1);
       continue;
     }

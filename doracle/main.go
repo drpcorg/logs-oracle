@@ -27,7 +27,7 @@ type Config struct {
 	MetricsPort int    `default:"8001"`
 
 	DataDir  string `required:"true"`
-	RamLimit int64  `default:"0"` // bytes
+	RamLimit uint64  `default:"0"` // bytes
 
 	NodeRPC  string `required:"true"`
 	NodeWS   string `required:"true"`
@@ -101,11 +101,11 @@ func main() {
 		for {
 			select {
 			case data := <-headch:
-				if err := db.UpdateHeight(data.Int64()); err != nil {
+				if err := db.UpdateHeight(data.Uint64()); err != nil {
 					log.Error().Err(err).Msg("couldn't update height in db")
 					return
 				} else {
-					log.Debug().Int64("head", data.Int64()).Msg("updated head in db")
+					log.Debug().Uint64("head", data.Uint64()).Msg("updated head in db")
 				}
 
 			case <-ctx.Done():
@@ -180,7 +180,7 @@ func main() {
 }
 
 type Filter struct {
-	Limit     *int64  `json:"limit"`
+	Limit     *uint64  `json:"limit"`
 	FromBlock *string `json:"fromBlock"`
 	ToBlock   *string `json:"toBlock"`
 
@@ -188,22 +188,22 @@ type Filter struct {
 	Topics  []interface{} `json:"topics"`
 }
 
-func parseBlockNumber(str *string, node *Node) (int64, error) {
+func parseBlockNumber(str *string, node *Node) (uint64, error) {
 	if str == nil {
-		return node.LatestBlock().Int64(), nil
+		return node.LatestBlock().Uint64(), nil
 	}
 
 	switch *str {
 	case "earliest":
 		return 0, nil
 	case "", "latest":
-		return node.LatestBlock().Int64(), nil
+		return node.LatestBlock().Uint64(), nil
 	case "safe":
-		return node.SafeBlock().Int64(), nil
+		return node.SafeBlock().Uint64(), nil
 	case "finalized":
-		return node.FinalizedBlock().Int64(), nil
+		return node.FinalizedBlock().Uint64(), nil
 	case "pending":
-		return node.PendingBlock().Int64(), nil
+		return node.PendingBlock().Uint64(), nil
 	}
 
 	// parse hex string
@@ -212,7 +212,7 @@ func parseBlockNumber(str *string, node *Node) (int64, error) {
 		return 0, fmt.Errorf("parse error")
 	}
 
-	return value.Int64(), nil
+	return value.Uint64(), nil
 }
 
 func (raw *Filter) ToQuery(node *Node) (*liboracle.Query, error) {
@@ -298,7 +298,7 @@ type (
 	Request []Filter
 
 	Response struct {
-		Result *int64 `json:"result,omitempty"`
+		Result *uint64 `json:"result,omitempty"`
 		Error  *string `json:"error,omitempty"`
 	}
 )
