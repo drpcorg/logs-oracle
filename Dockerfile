@@ -22,8 +22,8 @@ ARG GID=1000
 RUN adduser -D -u $UID -g $GID nonroot
 USER nonroot:nonroot
 
-COPY --from=build-stage /app/doracle/doracle /drpc-logs-oracle
+COPY --from=build-stage /app/doracle/doracle /logs-oracle
 
 EXPOSE 8000
 
-ENTRYPOINT ["/drpc-logs-oracle"]
+ENTRYPOINT ["/logs-oracle"]

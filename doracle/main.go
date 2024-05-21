@@ -18,7 +18,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/kelseyhightower/envconfig"
 
-	liboracle "github.com/p2p-org/drpc-logs-oracle"
+	liboracle "github.com/drpcorg/logs-oracle"
 )
 
 type Config struct {

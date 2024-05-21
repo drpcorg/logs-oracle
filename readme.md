@@ -1,4 +1,4 @@
-# DRPC LogsOracle ![Test](https://github.com/p2p-org/drpc-logs-oracle/actions/workflows/test.yml/badge.svg)
+# DRPC LogsOracle ![Test](https://github.com/drpcorg/logs-oracle/actions/workflows/bundle.yml/badge.svg)
 
 It's a cache answering the question "how many logs will be in the request to the node".
 
@@ -31,16 +31,16 @@ Run with docker:
 ```sh
 docker build \
   --build-arg="UID=$(id -u)" --build-arg="GID=$(id -g)" \
-  -t drpc-logs-oracle .
+  -t logs-oracle .
 
-mkdir -p -m=0600 ~/.local/share/drpc-logs-oracle # dir for storage
+mkdir -p -m=0600 ~/.local/share/logs-oracle # dir for storage
 docker run \
   -p 8000:8000 \
   --ulimit memlock=-1:-1 \
-  -v ~/.local/share/drpc-logs-oracle:/home/nonroot/data \
+  -v ~/.local/share/logs-oracle:/home/nonroot/data \
   -e ORACLE_DATA_DIR="/home/nonroot/data" \
   -e ORACLE_NODE_ADDR="..." \
-  drpc-logs-oracle
+  logs-oracle
 ```
 
 ## Options

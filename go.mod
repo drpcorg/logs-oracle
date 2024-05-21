@@ -1,3 +1,3 @@
-module github.com/p2p-org/drpc-logs-oracle
+module github.com/drpcorg/logs-oracle
 
 go 1.21

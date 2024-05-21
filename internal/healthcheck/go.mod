@@ -1,4 +1,4 @@
-module github.com/p2p-org/drpc-logs-oracle/cmd/healthcheck
+module github.com/drpcorg/logs-oracle/cmd/healthcheck
 
 go 1.21.5
 
