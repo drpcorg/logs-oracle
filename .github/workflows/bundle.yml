@@ -14,7 +14,7 @@ jobs:
     name: Static analysis
     runs-on: "ubuntu-latest"
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install dependencies
         run: |
@@ -31,13 +31,13 @@ jobs:
     needs: ['static']
     env: {CC: "clang"}
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
     - name: Install Go toolchain
-      uses: actions/setup-go@v4
+      uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
       with: {check-latest: true, go-version: '1.21'}
     - name: Install Java toolchain
-      uses: actions/setup-java@v4
+      uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
       with: {distribution: 'zulu', java-version: '20'}
     - name: Install dependencies
       run: |
@@ -70,7 +70,7 @@ jobs:
         jar uf java/LogsOracle.jar "liblogsoracle-x86_64-macos.dylib"
         mkdir -p _data && java --source=20 --enable-preview -cp ".:java/LogsOracle.jar" java/Example.java
 
-    - uses: actions/upload-artifact@v3
+    - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
       with:
         name: liblogsoracle_macos_clang
         path: liblogsoracle-*
@@ -87,13 +87,13 @@ jobs:
       CC: "${{ matrix.cc }}"
       CFLAGS: "-march=x86-64-v3"
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
     - name: Install Go toolchain
-      uses: actions/setup-go@v4
+      uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
       with: {check-latest: true, go-version: '1.21'}
     - name: Install Java toolchain
-      uses: actions/setup-java@v4
+      uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
       with: {distribution: 'zulu', java-version: '20'}
     - name: Install dependencies
       run: |
@@ -111,7 +111,7 @@ jobs:
     - name: Check JAR
       run: make java-example
 
-    - uses: actions/upload-artifact@v3
+    - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
       with:
         name: liblogsoracle_linux_${{matrix.cc}}
         path: liblogsoracle-*-linux.so
@@ -121,15 +121,15 @@ jobs:
     needs: ['linux', 'macos']
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v3
-    - uses: actions/setup-java@v3 
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+    - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
       with:
         distribution: 'zulu'
         java-version: 20
 
-    - uses: actions/download-artifact@v3
+    - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
       with: { name: 'liblogsoracle_macos_clang' }
-    - uses: actions/download-artifact@v3
+    - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
       with: { name: 'liblogsoracle_linux_clang' }
 
     - run: |
@@ -139,7 +139,7 @@ jobs:
         jar uf java/LogsOracle.jar liblogsoracle-x86_64-macos.dylib
         jar uf java/LogsOracle.jar liblogsoracle-arm64-macos.dylib
   
-    - uses: actions/upload-artifact@v3
+    - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
       with:
         name: LogsOracle.jar
         path: java/LogsOracle.jar
